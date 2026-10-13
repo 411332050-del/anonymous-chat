@@ -28,8 +28,11 @@ jobs:
         env:
           # 網址是 https://<帳號>.github.io/<儲存庫名稱>/，所以要告訴 Vite 基底路徑
           VITE_BASE: /${{ github.event.repository.name }}/
-          # 階段一：展示模式，不需要任何金鑰
-          VITE_CHAT_MODE: demo
+          # 階段二：正式模式。這兩個值從 Settings → Secrets and variables → Actions 取得，
+          # 都是「可公開」的值（Project URL 與 publishable key），最後仍會出現在打包後的網頁裡。
+          VITE_CHAT_MODE: live
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
