@@ -1,0 +1,26 @@
+import type { ChatEvents, Cursor, HistoryPage, Me, Unsubscribe } from './types'
+
+/**
+ * 聊天服務介面（架構文件所說的「插座」）。
+ * 畫面層只能透過它跟後端說話，絕對不可以直接碰 Supabase。
+ */
+export interface ChatService {
+  /** 進入大廳。成功回傳「我是誰」，接著會觸發 history:loaded、presence:count、connection:status。 */
+  join(): Promise<Me>
+  /** 發送訊息。成功時會收到同一個 id 的 message:new；失敗時收到 send:error。 */
+  sendMessage(id: string, content: string): Promise<void>
+  /** 載入更早的訊息（最多 50 則）。 */
+  loadOlder(before: Cursor): Promise<HistoryPage>
+  /** 離開大廳，停止接收事件。 */
+  leave(): void
+  on<E extends keyof ChatEvents>(event: E, handler: (payload: ChatEvents[E]) => void): Unsubscribe
+}
+
+/** 只有展示模式的假服務才有的測試開關（用網址 ?debug=1 打開面板）。 */
+export interface MockDebug {
+  setOffline(offline: boolean): void
+  setJoinFailure(fail: boolean): void
+  failNextSend(): void
+}
+
+export type DebuggableChatService = ChatService & { debug?: MockDebug }

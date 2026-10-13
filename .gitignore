@@ -6,3 +6,6 @@
 # 相依套件與打包結果
 node_modules/
 dist/
+
+# TypeScript 增量編譯暫存
+*.tsbuildinfo

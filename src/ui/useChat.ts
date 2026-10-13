@@ -1,0 +1,161 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChatService } from '../chat/ChatService'
+import type { ConnectionStatus, ErrorCode, Me, Message } from '../chat/types'
+import { RateLimiter, sanitize, validateContent } from '../rules'
+
+export type Phase = 'entering' | 'lobby' | 'failed'
+export type SendState = 'sending' | 'sent' | 'failed'
+
+export interface ViewMessage extends Message {
+  /** 只有自己的訊息會有送出狀態 */
+  state?: SendState
+}
+
+export type Hint = 'rate-limited' | 'offline' | 'unknown' | null
+
+const HINT_MS = 4000
+
+function byTime(a: ViewMessage, b: ViewMessage): number {
+  return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1
+}
+
+function hintFor(code: ErrorCode): Hint {
+  if (code === 'RATE_LIMITED') return 'rate-limited'
+  if (code === 'OFFLINE') return 'offline'
+  if (code === 'UNKNOWN') return 'unknown'
+  return null
+}
+
+/** 把聊天服務的事件整理成畫面要用的狀態。畫面層只透過這裡碰聊天服務。 */
+export function useChat(service: ChatService) {
+  const [phase, setPhase] = useState<Phase>('entering')
+  const [me, setMe] = useState<Me | null>(null)
+  const [messages, setMessages] = useState<ViewMessage[]>([])
+  const [reachedEnd, setReachedEnd] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [onlineCount, setOnlineCount] = useState(0)
+  const [connection, setConnection] = useState<ConnectionStatus>('connecting')
+  const [hint, setHint] = useState<Hint>(null)
+
+  const meRef = useRef<Me | null>(null)
+  const contents = useRef(new Map<string, string>())
+  const rateLimiter = useRef(new RateLimiter())
+  const hintTimer = useRef<number>()
+  const loadingRef = useRef(false)
+  const messagesRef = useRef<ViewMessage[]>([])
+  const reachedEndRef = useRef(false)
+  messagesRef.current = messages
+  reachedEndRef.current = reachedEnd
+
+  const showHint = useCallback((next: Hint) => {
+    window.clearTimeout(hintTimer.current)
+    setHint(next)
+    if (next) hintTimer.current = window.setTimeout(() => setHint(null), HINT_MS)
+  }, [])
+
+  const merge = useCallback((incoming: ViewMessage[]) => {
+    setMessages((prev) => {
+      const map = new Map(prev.map((m) => [m.id, m]))
+      for (const m of incoming) {
+        const existing = map.get(m.id)
+        // 自己的訊息收到伺服器確認後，保留原本的位置並改成已送出
+        map.set(m.id, existing ? { ...existing, ...m } : m)
+      }
+      return Array.from(map.values()).sort(byTime)
+    })
+  }, [])
+
+  const enter = useCallback(async () => {
+    setPhase('entering')
+    try {
+      const who = await service.join()
+      meRef.current = who
+      setMe(who)
+      setPhase('lobby')
+    } catch {
+      setPhase('failed')
+    }
+  }, [service])
+
+  useEffect(() => {
+    const offs = [
+      service.on('history:loaded', ({ messages: page, reachedEnd: end }) => {
+        setMessages(page)
+        setReachedEnd(end)
+      }),
+      service.on('message:new', (m) => {
+        const mine = m.authorId === meRef.current?.authorId
+        merge([mine ? { ...m, state: 'sent' } : m])
+      }),
+      service.on('presence:count', setOnlineCount),
+      service.on('connection:status', (status) => {
+        setConnection(status)
+        if (status === 'failed') setPhase('failed')
+      }),
+      service.on('send:error', ({ id, code }) => {
+        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, state: 'failed' } : m)))
+        showHint(hintFor(code))
+      }),
+    ]
+    void enter()
+    return () => {
+      offs.forEach((off) => off())
+      service.leave()
+      window.clearTimeout(hintTimer.current)
+    }
+  }, [service, enter, merge, showHint])
+
+  /** 傳送；回傳 true 代表已受理（輸入框可以清空）。 */
+  const send = useCallback(
+    (raw: string): boolean => {
+      const who = meRef.current
+      if (!who) return false
+      if (connection !== 'online') {
+        showHint('offline')
+        return false
+      }
+      const content = sanitize(raw)
+      if (validateContent(content)) return false
+      if (!rateLimiter.current.tryConsume()) {
+        showHint('rate-limited')
+        return false
+      }
+      const id = crypto.randomUUID()
+      contents.current.set(id, content)
+      merge([
+        { id, authorId: who.authorId, nickname: who.nickname, content, createdAt: new Date().toISOString(), state: 'sending' },
+      ])
+      void service.sendMessage(id, content)
+      return true
+    },
+    [connection, merge, service, showHint],
+  )
+
+  const retry = useCallback(
+    (id: string) => {
+      const content = contents.current.get(id)
+      if (!content) return
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, state: 'sending' } : m)))
+      void service.sendMessage(id, content)
+    },
+    [service],
+  )
+
+  const loadOlder = useCallback(async () => {
+    if (loadingRef.current || reachedEndRef.current) return
+    const oldest = messagesRef.current[0]
+    if (!oldest) return
+    loadingRef.current = true
+    setLoadingOlder(true)
+    try {
+      const page = await service.loadOlder({ createdAt: oldest.createdAt, id: oldest.id })
+      merge(page.messages)
+      setReachedEnd(page.reachedEnd)
+    } finally {
+      loadingRef.current = false
+      setLoadingOlder(false)
+    }
+  }, [merge, service])
+
+  return { phase, me, messages, reachedEnd, loadingOlder, onlineCount, connection, hint, send, retry, loadOlder, enter }
+}
