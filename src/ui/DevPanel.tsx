@@ -21,6 +21,9 @@ export function DevPanel({ debug }: { debug: MockDebug }) {
       <button type="button" onClick={() => debug.failNextSend()}>
         下一則傳送失敗
       </button>
+      <button type="button" onClick={() => debug.failNextLoadOlder()}>
+        下次載入更早失敗
+      </button>
       <button
         type="button"
         onClick={() => {

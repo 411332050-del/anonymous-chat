@@ -10,6 +10,8 @@ export const RATE_LIMIT_COUNT = 5
 export const RATE_LIMIT_WINDOW_MS = 10_000
 /** 兩則之間至少間隔 0.5 秒 */
 export const MIN_INTERVAL_MS = 500
+/** 斷線後重連超過這麼久仍失敗，就放棄並顯示「無法連線」 */
+export const RECONNECT_GIVE_UP_MS = 60_000
 
 /** 零寬字元、文字方向控制字元、其他控制字元（換行除外） */
 const HIDDEN_CHARS = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g

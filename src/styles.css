@@ -263,6 +263,11 @@ textarea {
   color: var(--text-muted);
 }
 
+.list__note--error {
+  color: var(--danger-soft);
+  font-size: 13px;
+}
+
 .empty {
   height: 100%;
   display: flex;

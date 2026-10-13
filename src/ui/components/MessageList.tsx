@@ -8,6 +8,7 @@ interface Props {
   meId: string
   reachedEnd: boolean
   loadingOlder: boolean
+  olderError: boolean
   onLoadOlder: () => void
   onRetry: (id: string) => void
 }
@@ -15,7 +16,7 @@ interface Props {
 const BOTTOM_SLOP = 80
 const TOP_TRIGGER = 40
 
-export function MessageList({ messages, meId, reachedEnd, loadingOlder, onLoadOlder, onRetry }: Props) {
+export function MessageList({ messages, meId, reachedEnd, loadingOlder, olderError, onLoadOlder, onRetry }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
   const prev = useRef<{ firstId?: string; lastId?: string; count: number; height: number }>({ count: 0, height: 0 })
@@ -58,7 +59,8 @@ export function MessageList({ messages, meId, reachedEnd, loadingOlder, onLoadOl
     if (!el) return
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_SLOP
     if (atBottom.current) setUnread(0)
-    if (el.scrollTop < TOP_TRIGGER) onLoadOlder()
+    // 失敗後不再自動重試，等使用者按「重試」，避免一直捲動就一直打 API
+    if (el.scrollTop < TOP_TRIGGER && !olderError) onLoadOlder()
   }
 
   return (
@@ -75,6 +77,14 @@ export function MessageList({ messages, meId, reachedEnd, loadingOlder, onLoadOl
               <div className="list__note">
                 <SpinnerIcon size={14} />
                 載入更早的訊息…
+              </div>
+            )}
+            {olderError && !loadingOlder && (
+              <div className="list__note list__note--error" role="status">
+                <span>載入更早的訊息失敗</span>
+                <button type="button" className="retry" onClick={onLoadOlder}>
+                  重試
+                </button>
               </div>
             )}
             {reachedEnd && !loadingOlder && <div className="list__note">— 已經是最早的訊息 —</div>}

@@ -33,6 +33,7 @@ export function useChat(service: ChatService) {
   const [messages, setMessages] = useState<ViewMessage[]>([])
   const [reachedEnd, setReachedEnd] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
   const [connection, setConnection] = useState<ConnectionStatus>('connecting')
   const [hint, setHint] = useState<Hint>(null)
@@ -147,15 +148,19 @@ export function useChat(service: ChatService) {
     if (!oldest) return
     loadingRef.current = true
     setLoadingOlder(true)
+    setOlderError(false)
     try {
       const page = await service.loadOlder({ createdAt: oldest.createdAt, id: oldest.id })
       merge(page.messages)
       setReachedEnd(page.reachedEnd)
+    } catch (error) {
+      console.error('[chat] 載入更早的訊息失敗', error)
+      setOlderError(true)
     } finally {
       loadingRef.current = false
       setLoadingOlder(false)
     }
   }, [merge, service])
 
-  return { phase, me, messages, reachedEnd, loadingOlder, onlineCount, connection, hint, send, retry, loadOlder, enter }
+  return { phase, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, connection, hint, send, retry, loadOlder, enter }
 }

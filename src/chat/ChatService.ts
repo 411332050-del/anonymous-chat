@@ -21,6 +21,7 @@ export interface MockDebug {
   setOffline(offline: boolean): void
   setJoinFailure(fail: boolean): void
   failNextSend(): void
+  failNextLoadOlder(): void
 }
 
 export type DebuggableChatService = ChatService & { debug?: MockDebug }

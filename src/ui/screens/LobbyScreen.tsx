@@ -9,6 +9,7 @@ interface Props {
   messages: ViewMessage[]
   reachedEnd: boolean
   loadingOlder: boolean
+  olderError: boolean
   onlineCount: number
   connection: ConnectionStatus
   hint: Hint
@@ -27,6 +28,7 @@ export function LobbyScreen(p: Props) {
           meId={p.me.authorId}
           reachedEnd={p.reachedEnd}
           loadingOlder={p.loadingOlder}
+          olderError={p.olderError}
           onLoadOlder={p.onLoadOlder}
           onRetry={p.onRetry}
         />

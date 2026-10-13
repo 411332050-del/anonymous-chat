@@ -2,7 +2,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import { Emitter } from '../emitter'
 import type { ChatService } from '../ChatService'
 import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, Unsubscribe } from '../types'
-import { PAGE_SIZE, sanitize, validateContent } from '../../rules'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, sanitize, validateContent } from '../../rules'
 
 // 階段二的真服務：Supabase 資料庫存訊息、Realtime 推送新訊息、Presence 算在線人數、
 // 匿名登入辨認同一個瀏覽器。資料庫那一側的規則見 supabase/migrations/0001_init.sql。
@@ -61,6 +61,7 @@ export class SupabaseChatService implements ChatService {
   private lastSeen: string | null = null
   private seen = new Set<string>()
   private timers = new Set<number>()
+  private giveUpTimer: number | undefined
   private disposed = true
 
   constructor(private config: Config) {}
@@ -110,7 +111,7 @@ export class SupabaseChatService implements ChatService {
         this.buffered.splice(0).forEach((m) => this.emitter.emit('message:new', m))
         this.emitPresence()
         this.everOnline = true
-        this.emitter.emit('connection:status', 'online')
+        this.markOnline()
       })
       return me
     } catch (error) {
@@ -226,7 +227,7 @@ export class SupabaseChatService implements ChatService {
             }
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             if (!settled) fail(new Error(`即時連線失敗：${status}`))
-            else if (this.everOnline) this.emitter.emit('connection:status', 'reconnecting')
+            else if (this.everOnline) this.markReconnecting()
           }
         })
     })
@@ -287,7 +288,28 @@ export class SupabaseChatService implements ChatService {
   // ---- 斷線重連 ----
 
   private onBrowserOffline = () => {
-    if (this.everOnline) this.emitter.emit('connection:status', 'reconnecting')
+    if (this.everOnline) this.markReconnecting()
+  }
+
+  /** 進入「重新連線中」，並開始計時；超過時間仍沒恢復就放棄。 */
+  private markReconnecting(): void {
+    this.emitter.emit('connection:status', 'reconnecting')
+    if (this.giveUpTimer === undefined) {
+      this.giveUpTimer = window.setTimeout(() => this.giveUp(), RECONNECT_GIVE_UP_MS)
+    }
+  }
+
+  private markOnline(): void {
+    window.clearTimeout(this.giveUpTimer)
+    this.giveUpTimer = undefined
+    this.emitter.emit('connection:status', 'online')
+  }
+
+  /** 重連太久：停止所有連線並回報失敗，畫面會顯示「無法連線」與重試。 */
+  private giveUp(): void {
+    this.giveUpTimer = undefined
+    this.teardown()
+    this.emitter.emit('connection:status', 'failed')
   }
 
   private onBrowserOnline = () => {
@@ -322,10 +344,10 @@ export class SupabaseChatService implements ChatService {
         })
       }
       this.emitPresence()
-      this.emitter.emit('connection:status', 'online')
+      this.markOnline()
     } catch (error) {
       console.error('[chat] 重連後補抓訊息失敗', error)
-      this.emitter.emit('connection:status', 'reconnecting')
+      this.markReconnecting()
     }
   }
 
@@ -343,6 +365,8 @@ export class SupabaseChatService implements ChatService {
     this.disposed = true
     this.timers.forEach((t) => window.clearTimeout(t))
     this.timers.clear()
+    window.clearTimeout(this.giveUpTimer)
+    this.giveUpTimer = undefined
     window.removeEventListener('offline', this.onBrowserOffline)
     window.removeEventListener('online', this.onBrowserOnline)
     if (this.channel && this.client) void this.client.removeChannel(this.channel)

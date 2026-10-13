@@ -19,6 +19,7 @@ export function App({ service }: { service: DebuggableChatService }) {
           messages={chat.messages}
           reachedEnd={chat.reachedEnd}
           loadingOlder={chat.loadingOlder}
+          olderError={chat.olderError}
           onlineCount={chat.onlineCount}
           connection={chat.connection}
           hint={chat.hint}

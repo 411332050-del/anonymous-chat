@@ -1,7 +1,7 @@
 import { Emitter } from '../emitter'
 import type { ChatService, MockDebug } from '../ChatService'
 import type { ChatEvents, Cursor, HistoryPage, Me, Message, Unsubscribe } from '../types'
-import { PAGE_SIZE, RateLimiter, sanitize, validateContent } from '../../rules'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, RateLimiter, sanitize, validateContent } from '../../rules'
 import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomNickname } from './seed'
 
 // 階段一的假服務：所有資料都只存在這個瀏覽器（localStorage），
@@ -57,6 +57,8 @@ export class MockChatService implements ChatService {
   private offline = false
   private joinFails = false
   private nextSendFails = false
+  private nextLoadOlderFails = false
+  private giveUpTimer: number | undefined
   /** 離線期間錯過的訊息，恢復連線後補發 */
   private missed: Message[] = []
 
@@ -76,6 +78,9 @@ export class MockChatService implements ChatService {
     },
     failNextSend: () => {
       this.nextSendFails = true
+    },
+    failNextLoadOlder: () => {
+      this.nextLoadOlderFails = true
     },
   }
 
@@ -153,6 +158,10 @@ export class MockChatService implements ChatService {
 
   async loadOlder(before: Cursor): Promise<HistoryPage> {
     await delay(400)
+    if (this.nextLoadOlderFails || this.offline) {
+      this.nextLoadOlderFails = false
+      throw new Error('mock loadOlder failure')
+    }
     const older = this.readMessages().filter(
       (m) => m.createdAt < before.createdAt || (m.createdAt === before.createdAt && m.id < before.id),
     )
@@ -170,6 +179,8 @@ export class MockChatService implements ChatService {
     }
     this.timers.forEach((t) => window.clearTimeout(t))
     this.timers = []
+    window.clearTimeout(this.giveUpTimer)
+    this.giveUpTimer = undefined
     this.otherTabs.clear()
     this.joined = false
     window.removeEventListener('pagehide', this.onPageHide)
@@ -312,9 +323,18 @@ export class MockChatService implements ChatService {
     if (offline) {
       this.offline = true
       this.emitter.emit('connection:status', 'reconnecting')
+      // 重連太久就放棄，跟正式服務同一條規則
+      this.giveUpTimer = window.setTimeout(() => {
+        this.giveUpTimer = undefined
+        this.leave()
+        this.offline = false
+        this.emitter.emit('connection:status', 'failed')
+      }, RECONNECT_GIVE_UP_MS)
       return
     }
     // 模擬網路恢復：稍等一下再回到線上，並補發錯過的訊息
+    window.clearTimeout(this.giveUpTimer)
+    this.giveUpTimer = undefined
     window.setTimeout(() => {
       this.offline = false
       const missed = this.missed.splice(0)
