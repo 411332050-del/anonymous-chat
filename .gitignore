@@ -1,0 +1,8 @@
+# 金鑰與環境設定（見 docs/architecture.md 第 8 節）
+.env
+.env.local
+.env.*.local
+
+# 相依套件與打包結果
+node_modules/
+dist/
