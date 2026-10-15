@@ -8,6 +8,8 @@ interface Props {
   connection: ConnectionStatus
   hint: Hint
   onSend: (text: string) => boolean
+  /** 輸入框有內容且正在變動時呼叫（服務端自己節流） */
+  onTyping: () => void
 }
 
 const HINT_TEXT: Record<Exclude<Hint, null>, string> = {
@@ -19,7 +21,7 @@ const HINT_TEXT: Record<Exclude<Hint, null>, string> = {
 // 手機上 Enter 應該換行（送出靠按鈕）；有實體鍵盤的裝置 Enter 才送出。
 const isTouchDevice = () => window.matchMedia('(pointer: coarse)').matches
 
-export function Composer({ connection, hint, onSend }: Props) {
+export function Composer({ connection, hint, onSend, onTyping }: Props) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
   const offline = connection !== 'online'
@@ -57,7 +59,10 @@ export function Composer({ connection, hint, onSend }: Props) {
             value={text}
             disabled={offline}
             placeholder={offline ? '連線後才能發言' : '說點什麼…'}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value)
+              if (e.target.value.trim().length > 0) onTyping()
+            }}
             onKeyDown={(e) => {
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               if (isTouchDevice()) return

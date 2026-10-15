@@ -25,6 +25,8 @@ export function App({ service }: { service: DebuggableChatService }) {
           onlineCount={chat.onlineCount}
           members={chat.members}
           notices={chat.notices}
+          typers={chat.typers}
+          onTyping={chat.notifyTyping}
           onLeave={chat.backToEntry}
           connection={chat.connection}
           hint={chat.hint}

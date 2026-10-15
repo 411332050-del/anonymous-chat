@@ -2,7 +2,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import { Emitter } from '../emitter'
 import type { ChatService } from '../ChatService'
 import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, PresenceMember, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, TYPING_SEND_INTERVAL_MS, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
 
 // 階段二的真服務：Supabase 資料庫存訊息、Realtime 推送新訊息、Presence 算在線人數、
 // 匿名登入辨認同一個瀏覽器。資料庫那一側的規則見 supabase/migrations/0001_init.sql 與 0002_alias.sql。
@@ -67,6 +67,7 @@ export class SupabaseChatService implements ChatService {
   private seen = new Set<string>()
   /** 上一次的在線名單（authorId → 名稱），用來比對誰進來、誰離開 */
   private knownPresence: Map<string, string> | null = null
+  private lastTypingSent = 0
   private timers = new Set<number>()
   private giveUpTimer: number | undefined
   private disposed = true
@@ -177,6 +178,16 @@ export class SupabaseChatService implements ChatService {
     }
   }
 
+  notifyTyping(): void {
+    const channel = this.channel
+    const me = this.me
+    if (!channel || !me || this.disposed || channel.state !== 'joined') return
+    const now = Date.now()
+    if (now - this.lastTypingSent < TYPING_SEND_INTERVAL_MS) return
+    this.lastTypingSent = now
+    void channel.send({ type: 'broadcast', event: 'typing', payload: { authorId: me.authorId, nickname: me.nickname } })
+  }
+
   leave(): void {
     this.teardown()
   }
@@ -212,7 +223,9 @@ export class SupabaseChatService implements ChatService {
       this.timers.add(timeout)
 
       // 用登入身分當 presence 的 key：同一個人開好幾個分頁只算一人在線
-      const channel = client.channel(CHANNEL_NAME, { config: { presence: { key: me.authorId } } })
+      const channel = client.channel(CHANNEL_NAME, {
+        config: { presence: { key: me.authorId }, broadcast: { self: false } },
+      })
       this.channel = channel
 
       channel
@@ -221,6 +234,7 @@ export class SupabaseChatService implements ChatService {
           if (message) this.onRealtimeMessage(message)
         })
         .on('presence', { event: 'sync' }, () => this.emitPresence())
+        .on('broadcast', { event: 'typing' }, ({ payload }) => this.onTyping(payload))
         .subscribe((status) => {
           if (this.disposed || this.channel !== channel) return
 
@@ -274,6 +288,14 @@ export class SupabaseChatService implements ChatService {
     this.seen.add(message.id)
     if (this.seen.size > SEEN_CAP) this.seen.delete(this.seen.values().next().value as string)
     if (!this.lastSeen || message.createdAt > this.lastSeen) this.lastSeen = message.createdAt
+  }
+
+  /** 別人的「正在輸入」訊號：來自其他瀏覽器，先檢查格式才使用。 */
+  private onTyping(payload: unknown): void {
+    const { authorId, nickname } = (payload ?? {}) as { authorId?: unknown; nickname?: unknown }
+    if (typeof authorId !== 'string' || authorId.length === 0 || authorId === this.me?.authorId) return
+    if (!isValidNickname(nickname)) return
+    this.emitter.emit('typing', { authorId, nickname })
   }
 
   /** 登記在線時附上自己的名稱（名稱以資料庫回傳的為準）。 */

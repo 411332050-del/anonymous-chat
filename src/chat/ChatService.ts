@@ -15,6 +15,8 @@ export interface ChatService {
   sendMessage(id: string, content: string): Promise<void>
   /** 載入更早的訊息（最多 50 則）。 */
   loadOlder(before: Cursor): Promise<HistoryPage>
+  /** 告訴大家「我正在輸入」。服務自己會節流並忽略離線狀態，畫面可以在每次輸入時直接呼叫。 */
+  notifyTyping(): void
   /** 離開大廳，停止接收事件。 */
   leave(): void
   on<E extends keyof ChatEvents>(event: E, handler: (payload: ChatEvents[E]) => void): Unsubscribe

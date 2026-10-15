@@ -1,7 +1,7 @@
 import { Emitter } from '../emitter'
 import type { ChatService, MockDebug } from '../ChatService'
 import type { ChatEvents, Cursor, HistoryPage, Me, Message, PresenceMember, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, TYPING_SEND_INTERVAL_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
 import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomTag } from './seed'
 
 // 階段一的假服務：所有資料都只存在這個瀏覽器（localStorage），
@@ -19,6 +19,7 @@ type Wire =
   | { type: 'hello'; tabId: string; member: PresenceMember }
   | { type: 'here'; tabId: string; member: PresenceMember }
   | { type: 'bye'; tabId: string }
+  | { type: 'typing'; authorId: string; nickname: string }
 
 function readJson<T>(key: string): T | null {
   try {
@@ -53,6 +54,7 @@ export class MockChatService implements ChatService {
   /** 假裝在線的機器人（BOT_AUTHORS 的索引） */
   private fakeOnline = new Set<number>()
   private knownPresence: Map<string, string> | null = null
+  private lastTypingSent = 0
   private timers: number[] = []
   private joined = false
 
@@ -177,6 +179,14 @@ export class MockChatService implements ChatService {
     }
   }
 
+  notifyTyping(): void {
+    if (!this.me || !this.joined || this.offline) return
+    const now = Date.now()
+    if (now - this.lastTypingSent < TYPING_SEND_INTERVAL_MS) return
+    this.lastTypingSent = now
+    this.channel?.postMessage({ type: 'typing', authorId: this.me.authorId, nickname: this.me.nickname } satisfies Wire)
+  }
+
   leave(): void {
     if (this.channel) {
       this.channel.postMessage({ type: 'bye', tabId: this.tabId } satisfies Wire)
@@ -269,6 +279,11 @@ export class MockChatService implements ChatService {
         this.otherTabs.delete(wire.tabId)
         this.emitPresence()
         break
+      case 'typing':
+        if (!this.offline && typeof wire.authorId === 'string' && isValidNickname(wire.nickname) && wire.authorId !== this.me?.authorId) {
+          this.emitter.emit('typing', { authorId: wire.authorId, nickname: wire.nickname })
+        }
+        break
       case 'message': {
         const message = parseMessage(wire.message)
         if (message) this.deliver(message)
@@ -353,16 +368,23 @@ export class MockChatService implements ChatService {
     writeJson(BOT_LEASE_KEY, { tabId: this.tabId, until: now + 40_000 })
 
     const author = BOT_AUTHORS[Math.floor(Math.random() * BOT_AUTHORS.length)]
-    const message: Message = {
-      id: newId(),
-      authorId: author.authorId,
-      nickname: author.nickname,
-      content: BOT_LINES[Math.floor(Math.random() * BOT_LINES.length)],
-      createdAt: new Date().toISOString(),
-    }
-    this.store(message)
-    this.channel?.postMessage({ type: 'message', message } satisfies Wire)
-    this.emitter.emit('message:new', message)
+    // 機器人先「正在輸入」一下，再把訊息送出
+    this.emitter.emit('typing', { authorId: author.authorId, nickname: author.nickname })
+    this.timers.push(
+      window.setTimeout(() => {
+        if (this.offline || !this.joined) return
+        const message: Message = {
+          id: newId(),
+          authorId: author.authorId,
+          nickname: author.nickname,
+          content: BOT_LINES[Math.floor(Math.random() * BOT_LINES.length)],
+          createdAt: new Date().toISOString(),
+        }
+        this.store(message)
+        this.channel?.postMessage({ type: 'message', message } satisfies Wire)
+        this.emitter.emit('message:new', message)
+      }, 2_000),
+    )
   }
 
   // ---- 測試開關 ----

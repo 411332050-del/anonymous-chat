@@ -696,3 +696,17 @@ textarea {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* ---------- 正在輸入 ---------- */
+
+.typing {
+  flex: none;
+  min-height: 22px;
+  padding: 2px 16px 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

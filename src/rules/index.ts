@@ -44,6 +44,11 @@ export function aliasProblem(alias: string): string | null {
   return null
 }
 
+/** 「正在輸入」訊號最多每隔這麼久送一次（控制即時流量） */
+export const TYPING_SEND_INTERVAL_MS = 3_000
+/** 收到訊號後，這麼久沒再收到就當作停止輸入 */
+export const TYPING_EXPIRE_MS = 5_000
+
 /** 回傳錯誤代碼；通過則回傳 null。傳入的應是 sanitize 之後的文字。 */
 export function validateContent(content: string): ErrorCode | null {
   if (content.length === 0) return 'EMPTY'

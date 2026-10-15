@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatService } from '../chat/ChatService'
 import type { ConnectionStatus, ErrorCode, Me, Message, PresenceMember } from '../chat/types'
-import { RateLimiter, sanitize, validateContent } from '../rules'
+import { RateLimiter, TYPING_EXPIRE_MS, sanitize, validateContent } from '../rules'
 
 export type Phase = 'entry' | 'entering' | 'lobby' | 'failed'
 export type SendState = 'sending' | 'sent' | 'failed'
@@ -38,6 +38,8 @@ export function useChat(service: ChatService) {
   const [olderError, setOlderError] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
   const [members, setMembers] = useState<PresenceMember[]>([])
+  const [typers, setTypers] = useState<{ authorId: string; nickname: string }[]>([])
+  const typingTimers = useRef(new Map<string, number>())
   const [notices, setNotices] = useState<{ id: number; text: string }[]>([])
   const [connection, setConnection] = useState<ConnectionStatus>('connecting')
   const [hint, setHint] = useState<Hint>(null)
@@ -54,6 +56,12 @@ export function useChat(service: ChatService) {
   const reachedEndRef = useRef(false)
   messagesRef.current = messages
   reachedEndRef.current = reachedEnd
+
+  const clearTyper = useCallback((authorId: string) => {
+    window.clearTimeout(typingTimers.current.get(authorId))
+    typingTimers.current.delete(authorId)
+    setTypers((prev) => prev.filter((t) => t.authorId !== authorId))
+  }, [])
 
   const showHint = useCallback((next: Hint) => {
     window.clearTimeout(hintTimer.current)
@@ -94,11 +102,17 @@ export function useChat(service: ChatService) {
         setReachedEnd(end)
       }),
       service.on('message:new', (m) => {
+        clearTyper(m.authorId)
         const mine = m.authorId === meRef.current?.authorId
         merge([mine ? { ...m, state: 'sent' } : m])
       }),
       service.on('presence:count', setOnlineCount),
       service.on('presence:list', setMembers),
+      service.on('typing', ({ authorId, nickname }) => {
+        window.clearTimeout(typingTimers.current.get(authorId))
+        typingTimers.current.set(authorId, window.setTimeout(() => clearTyper(authorId), TYPING_EXPIRE_MS))
+        setTypers((prev) => (prev.some((t) => t.authorId === authorId) ? prev : [...prev, { authorId, nickname }]))
+      }),
       service.on('presence:notice', ({ kind, nickname }) => {
         // 提示可以疊加（最多同時 3 則），各自 6 秒後消失，避免連續進出時被蓋掉
         const id = ++noticeSeq.current
@@ -123,10 +137,12 @@ export function useChat(service: ChatService) {
       offs.forEach((off) => off())
       service.leave()
       window.clearTimeout(hintTimer.current)
+      typingTimers.current.forEach((t) => window.clearTimeout(t))
+      typingTimers.current.clear()
       noticeTimers.current.forEach((t) => window.clearTimeout(t))
       noticeTimers.current.clear()
     }
-  }, [service, merge, showHint])
+  }, [service, merge, showHint, clearTyper])
 
   /** 傳送；回傳 true 代表已受理（輸入框可以清空）。 */
   const send = useCallback(
@@ -185,8 +201,13 @@ export function useChat(service: ChatService) {
   }, [merge, service])
 
   /** 離開聊天室，回到進入畫面（可以換代號再進入）。 */
+  const notifyTyping = useCallback(() => service.notifyTyping(), [service])
+
   const backToEntry = useCallback(() => {
     service.leave()
+    typingTimers.current.forEach((t) => window.clearTimeout(t))
+    typingTimers.current.clear()
+    setTypers([])
     noticeTimers.current.forEach((t) => window.clearTimeout(t))
     noticeTimers.current.clear()
     setNotices([])
@@ -198,5 +219,5 @@ export function useChat(service: ChatService) {
     setPhase('entry')
   }, [service])
 
-  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notices, connection, hint, send, retry, loadOlder, enter }
+  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notices, typers, notifyTyping, connection, hint, send, retry, loadOlder, enter }
 }

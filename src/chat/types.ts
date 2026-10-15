@@ -28,6 +28,12 @@ export interface PresenceNotice {
   nickname: string
 }
 
+/** 有人正在輸入（不含自己） */
+export interface TypingSignal {
+  authorId: string
+  nickname: string
+}
+
 export type ErrorCode = 'EMPTY' | 'TOO_LONG' | 'RATE_LIMITED' | 'OFFLINE' | 'UNKNOWN'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'reconnecting' | 'failed'
@@ -52,6 +58,7 @@ export interface ChatEvents {
   /** 目前在線的名單（同一人開多個分頁只算一人） */
   'presence:list': PresenceMember[]
   'presence:notice': PresenceNotice
+  typing: TypingSignal
   'connection:status': ConnectionStatus
   'send:error': { id: string; code: ErrorCode }
 }
