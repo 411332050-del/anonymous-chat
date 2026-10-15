@@ -1,32 +1,36 @@
-/* 設計變數與畫面規格來自 docs/design.md */
+/* 設計變數與畫面規格來自 docs/design.md（風格 B：方格筆記本） */
 
 :root {
-  --bg: #141518;
-  --surface: #1c1e22;
-  --border: #2a2d33;
-  --border-input: #3a3d45;
-  --text: #e8e9ec;
-  --text-muted: #9ba1ac;
-  --text-soft: #c3c7cf;
-  --accent: #7c8cff;
-  --accent-ink: #10122b;
-  --accent-text: #aab4ff;
-  --bubble-other: #2b2d33;
-  --bubble-mine: #4452c4;
-  --danger: #ff8a8a;
-  --danger-text: #ffb3b3;
-  --danger-soft: #ff9d9d;
-  --danger-bg: #3a1f26;
-  --warn-bg: #3a2f12;
-  --warn-border: #6b5517;
-  --warn-text: #ffd98a;
-  --online: #5fd38d;
-  --disabled-bg: #2b2d33;
-  --disabled-ink: #6b707a;
-  --pill-bg: #2b2f55;
-  --pill-border: #5560c9;
-  --pill-text: #d7dcff;
+  /* 風格 B「方格筆記本」：淡藍灰方格紙、墨藍線條、螢光黃是唯一的亮色 */
+  --bg: #eef3f7;
+  --surface: #ffffff;
+  --border: #c3cedb;
+  --border-input: #14213d;
+  --text: #14213d;
+  --text-muted: #5b6b82;
+  --text-soft: #33445f;
+  --accent: #ffe14d;
+  --accent-ink: #14213d;
+  --accent-text: #2347a6;
+  --bubble-other: #ffffff;
+  --bubble-mine: #ffe14d;
+  --danger: #d6335a;
+  --danger-text: #a81d40;
+  --danger-soft: #c42750;
+  --danger-bg: #fde8ee;
+  --warn-bg: #fff1c2;
+  --warn-border: #e0b400;
+  --warn-text: #6b5200;
+  --online: #1f9d6b;
+  --disabled-bg: #e3e8ee;
+  --disabled-ink: #8795a8;
+  --pill-bg: #fff3a6;
+  --pill-border: #14213d;
+  --pill-text: #14213d;
+  --ink: #14213d;
+  --grid: #d7e0ea;
   --font: 'Noto Sans TC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-hand: 'LXGW WenKai TC', 'Noto Sans TC', 'Kaiti TC', 'DFKai-SB', serif;
 }
 
 * {
@@ -780,4 +784,242 @@ textarea {
   border-radius: 50%;
   background: none;
   font-size: 18px;
+}
+
+
+/* ============================================================
+   風格 B：方格筆記本（只改外觀，不改任何文字與行為）
+   ============================================================ */
+
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 標題與名稱用手寫感的字 */
+.header__title,
+.center-screen h1,
+.header__nickname,
+.empty p {
+  font-family: var(--font-hand);
+}
+
+.center-screen h1 {
+  font-size: 30px;
+  letter-spacing: 0.04em;
+}
+
+.center-screen {
+  color: var(--ink);
+}
+
+.center-screen--error {
+  color: var(--danger-text);
+}
+
+/* 主按鈕：螢光黃、墨藍框、硬陰影；按下時壓進去 */
+.primary,
+.send {
+  border: 2px solid var(--ink);
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+
+.primary {
+  border-radius: 10px;
+}
+
+.send {
+  border-radius: 10px;
+}
+
+.primary:active:not(:disabled),
+.send:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+.primary:disabled,
+.send:disabled {
+  border-color: var(--disabled-ink);
+  background: var(--disabled-bg);
+  color: var(--disabled-ink);
+  box-shadow: none;
+}
+
+.entry__field input {
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.entry__field input:focus {
+  outline: 3px solid var(--accent);
+  outline-offset: 0;
+}
+
+.demo-note {
+  background: var(--warn-bg);
+  border: 1.5px dashed var(--ink);
+  border-radius: 8px;
+  color: var(--text-soft);
+}
+
+/* 頂部：白紙條加墨藍底線 */
+.header {
+  background: #fff;
+  border-bottom: 2px solid var(--ink);
+}
+
+.header__nickname {
+  padding: 0 6px;
+  background: var(--accent);
+  border-radius: 3px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.header__leave {
+  border: 1.5px solid var(--ink);
+  border-radius: 6px;
+  color: var(--ink);
+}
+
+.online-list {
+  border: 1.5px solid var(--ink);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.banner {
+  border-bottom: 2px solid var(--ink);
+}
+
+.presence-notice:not(:empty) {
+  background: #fff;
+  border-bottom: 1.5px dashed var(--ink);
+  color: var(--text-soft);
+}
+
+.typing {
+  color: var(--text-soft);
+}
+
+/* 訊息：像貼在方格紙上的便條 */
+.bubble {
+  border: 1.5px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  color: var(--ink);
+}
+
+.bubble--other,
+.bubble--mine {
+  border-radius: 4px;
+}
+
+.bubble--mine {
+  color: var(--ink);
+}
+
+.bubble--mine.is-failed {
+  border-color: var(--danger);
+  box-shadow: 2px 2px 0 var(--danger);
+}
+
+.bubble--mine.is-sending {
+  box-shadow: none;
+}
+
+.msg__meta {
+  color: var(--text-muted);
+}
+
+.retry {
+  border: 1.5px solid var(--danger);
+  border-radius: 6px;
+}
+
+.new-pill {
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: 2px 2px 0 var(--ink);
+  color: var(--ink);
+}
+
+/* 輸入區 */
+.composer {
+  background: #fff;
+  border-top: 2px solid var(--ink);
+}
+
+.composer__box {
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.composer__box:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+.composer__box.is-over,
+.composer__box.is-over:focus-within {
+  border-color: var(--danger);
+  box-shadow: none;
+}
+
+/* 表情回應 */
+.reaction-chip,
+.reaction-add {
+  border: 1.5px solid var(--ink);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.reaction-chip.is-mine {
+  background: var(--accent);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.reaction-picker {
+  border: 1.5px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.reaction-picker__item {
+  border-radius: 6px;
+}
+
+.reaction-picker__item:hover {
+  background: var(--accent);
+}
+
+@media (min-width: 768px) {
+  .composer {
+    background: transparent;
+    border-top: 0;
+  }
+
+  .composer__box {
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .header__title {
+    font-size: 24px;
+  }
 }
