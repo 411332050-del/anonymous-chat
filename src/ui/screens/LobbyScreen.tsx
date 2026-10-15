@@ -1,4 +1,4 @@
-import type { ConnectionStatus, Me } from '../../chat/types'
+import type { ConnectionStatus, Me, PresenceMember } from '../../chat/types'
 import { Composer } from '../components/Composer'
 import { Header } from '../components/Header'
 import { MessageList } from '../components/MessageList'
@@ -11,6 +11,8 @@ interface Props {
   loadingOlder: boolean
   olderError: boolean
   onlineCount: number
+  members: PresenceMember[]
+  notice: string | null
   connection: ConnectionStatus
   hint: Hint
   onSend: (text: string) => boolean
@@ -21,7 +23,7 @@ interface Props {
 export function LobbyScreen(p: Props) {
   return (
     <div className="lobby">
-      <Header me={p.me} onlineCount={p.onlineCount} connection={p.connection} />
+      <Header me={p.me} onlineCount={p.onlineCount} members={p.members} notice={p.notice} connection={p.connection} />
       <div className="lobby__body">
         <MessageList
           messages={p.messages}

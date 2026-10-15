@@ -69,6 +69,11 @@ export class RateLimiter {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const NICKNAME_MAX_LENGTH = 20
 
+/** 在線名單裡的一個人：資料來自其他瀏覽器，同樣先檢查格式才使用。 */
+export function isValidNickname(nickname: unknown): nickname is string {
+  return typeof nickname === 'string' && charCount(nickname) >= 1 && charCount(nickname) <= NICKNAME_MAX_LENGTH
+}
+
 /**
  * 收到的訊息先檢查欄位格式，不合格回傳 null（呼叫端丟棄）。
  * 假服務與 Supabase 服務的所有入口（歷史、即時、載入更早）都必須經過這裡。

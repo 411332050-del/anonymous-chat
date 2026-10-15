@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatService } from '../chat/ChatService'
-import type { ConnectionStatus, ErrorCode, Me, Message } from '../chat/types'
+import type { ConnectionStatus, ErrorCode, Me, Message, PresenceMember } from '../chat/types'
 import { RateLimiter, sanitize, validateContent } from '../rules'
 
 export type Phase = 'entry' | 'entering' | 'lobby' | 'failed'
@@ -14,6 +14,7 @@ export interface ViewMessage extends Message {
 export type Hint = 'rate-limited' | 'offline' | 'unknown' | null
 
 const HINT_MS = 4000
+const NOTICE_MS = 4000
 
 function byTime(a: ViewMessage, b: ViewMessage): number {
   return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1
@@ -35,6 +36,8 @@ export function useChat(service: ChatService) {
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [olderError, setOlderError] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
+  const [members, setMembers] = useState<PresenceMember[]>([])
+  const [notice, setNotice] = useState<string | null>(null)
   const [connection, setConnection] = useState<ConnectionStatus>('connecting')
   const [hint, setHint] = useState<Hint>(null)
 
@@ -43,6 +46,7 @@ export function useChat(service: ChatService) {
   const contents = useRef(new Map<string, string>())
   const rateLimiter = useRef(new RateLimiter())
   const hintTimer = useRef<number>()
+  const noticeTimer = useRef<number>()
   const loadingRef = useRef(false)
   const messagesRef = useRef<ViewMessage[]>([])
   const reachedEndRef = useRef(false)
@@ -92,6 +96,12 @@ export function useChat(service: ChatService) {
         merge([mine ? { ...m, state: 'sent' } : m])
       }),
       service.on('presence:count', setOnlineCount),
+      service.on('presence:list', setMembers),
+      service.on('presence:notice', ({ kind, nickname }) => {
+        window.clearTimeout(noticeTimer.current)
+        setNotice(`${nickname} ${kind === 'join' ? '進來了' : '離開了'}`)
+        noticeTimer.current = window.setTimeout(() => setNotice(null), NOTICE_MS)
+      }),
       service.on('connection:status', (status) => {
         setConnection(status)
         if (status === 'failed') setPhase('failed')
@@ -105,6 +115,7 @@ export function useChat(service: ChatService) {
       offs.forEach((off) => off())
       service.leave()
       window.clearTimeout(hintTimer.current)
+      window.clearTimeout(noticeTimer.current)
     }
   }, [service, merge, showHint])
 
@@ -169,5 +180,5 @@ export function useChat(service: ChatService) {
     setPhase('entry')
   }, [service])
 
-  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, connection, hint, send, retry, loadOlder, enter }
+  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notice, connection, hint, send, retry, loadOlder, enter }
 }

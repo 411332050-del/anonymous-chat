@@ -1,7 +1,7 @@
 import { Emitter } from '../emitter'
 import type { ChatService, MockDebug } from '../ChatService'
-import type { ChatEvents, Cursor, HistoryPage, Me, Message, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, RateLimiter, aliasProblem, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import type { ChatEvents, Cursor, HistoryPage, Me, Message, PresenceMember, Unsubscribe } from '../types'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
 import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomTag } from './seed'
 
 // 階段一的假服務：所有資料都只存在這個瀏覽器（localStorage），
@@ -12,13 +12,12 @@ const MESSAGES_KEY = 'anonchat.messages'
 const BOT_LEASE_KEY = 'anonchat.botLease'
 const CHANNEL_NAME = 'anonchat'
 const MAX_STORED = 500
-const FAKE_BASE_MIN = 6
-const FAKE_BASE_MAX = 14
+const FAKE_ONLINE_MIN = 2
 
 type Wire =
   | { type: 'message'; message: Message }
-  | { type: 'hello'; tabId: string }
-  | { type: 'here'; tabId: string }
+  | { type: 'hello'; tabId: string; member: PresenceMember }
+  | { type: 'here'; tabId: string; member: PresenceMember }
   | { type: 'bye'; tabId: string }
 
 function readJson<T>(key: string): T | null {
@@ -49,8 +48,11 @@ export class MockChatService implements ChatService {
   private tabId = newId()
   private me: Me | null = null
   private channel: BroadcastChannel | null = null
-  private otherTabs = new Set<string>()
-  private fakeBase = 10
+  /** 其他分頁（tabId → 那個分頁的身分） */
+  private otherTabs = new Map<string, PresenceMember>()
+  /** 假裝在線的機器人（BOT_AUTHORS 的索引） */
+  private fakeOnline = new Set<number>()
+  private knownPresence: Map<string, string> | null = null
   private timers: number[] = []
   private joined = false
 
@@ -99,6 +101,8 @@ export class MockChatService implements ChatService {
     }
 
     this.me = this.loadOrCreateIdentity(alias)
+    this.fakeOnline = new Set([0, 1, 2, 3].slice(0, FAKE_ONLINE_MIN + Math.floor(Math.random() * 3)))
+    this.knownPresence = null
     this.ensureSeeded()
     this.openChannel()
     this.joined = true
@@ -246,19 +250,19 @@ export class MockChatService implements ChatService {
     const channel = new BroadcastChannel(CHANNEL_NAME)
     this.channel = channel
     channel.onmessage = (event: MessageEvent<Wire>) => this.onWire(event.data)
-    channel.postMessage({ type: 'hello', tabId: this.tabId } satisfies Wire)
+    channel.postMessage({ type: 'hello', tabId: this.tabId, member: this.selfMember() } satisfies Wire)
     window.addEventListener('pagehide', this.onPageHide)
   }
 
   private onWire(wire: Wire): void {
     switch (wire.type) {
       case 'hello':
-        this.otherTabs.add(wire.tabId)
-        this.channel?.postMessage({ type: 'here', tabId: this.tabId } satisfies Wire)
+        this.rememberTab(wire)
+        this.channel?.postMessage({ type: 'here', tabId: this.tabId, member: this.selfMember() } satisfies Wire)
         this.emitPresence()
         break
       case 'here':
-        this.otherTabs.add(wire.tabId)
+        this.rememberTab(wire)
         this.emitPresence()
         break
       case 'bye':
@@ -273,9 +277,37 @@ export class MockChatService implements ChatService {
     }
   }
 
+  private selfMember(): PresenceMember {
+    return { authorId: this.me!.authorId, nickname: this.me!.nickname }
+  }
+
+  private rememberTab(wire: { tabId: string; member: PresenceMember }): void {
+    const { authorId, nickname } = wire.member ?? {}
+    if (typeof authorId === 'string' && isValidNickname(nickname)) {
+      this.otherTabs.set(wire.tabId, { authorId, nickname })
+    }
+  }
+
+  /** 在線名單：自己、其他分頁的身分、假裝在線的機器人；同一個身分只算一人。 */
   private emitPresence(): void {
-    if (this.offline) return
-    this.emitter.emit('presence:count', 1 + this.otherTabs.size + this.fakeBase)
+    if (this.offline || !this.me) return
+    const map = new Map<string, string>()
+    map.set(this.me.authorId, this.me.nickname)
+    this.otherTabs.forEach((m) => map.set(m.authorId, m.nickname))
+    this.fakeOnline.forEach((i) => map.set(BOT_AUTHORS[i].authorId, BOT_AUTHORS[i].nickname))
+    const members: PresenceMember[] = Array.from(map, ([authorId, nickname]) => ({ authorId, nickname }))
+    this.emitter.emit('presence:list', members)
+    this.emitter.emit('presence:count', members.length)
+
+    if (this.knownPresence) {
+      for (const [id, nickname] of map) {
+        if (!this.knownPresence.has(id) && id !== this.me.authorId) this.emitter.emit('presence:notice', { kind: 'join', nickname })
+      }
+      for (const [id, nickname] of this.knownPresence) {
+        if (!map.has(id) && id !== this.me.authorId) this.emitter.emit('presence:notice', { kind: 'leave', nickname })
+      }
+    }
+    this.knownPresence = map
   }
 
   /** 收到別人的訊息：離線時先存著，恢復連線後補發。 */
@@ -299,8 +331,13 @@ export class MockChatService implements ChatService {
     this.timers.push(window.setTimeout(botTick, 8_000 + Math.random() * 6_000))
 
     const presenceTick = () => {
-      const step = Math.random() < 0.5 ? -1 : 1
-      this.fakeBase = Math.min(FAKE_BASE_MAX, Math.max(FAKE_BASE_MIN, this.fakeBase + step))
+      // 隨機讓一個機器人進來或離開，至少保留 FAKE_ONLINE_MIN 個
+      const idx = Math.floor(Math.random() * BOT_AUTHORS.length)
+      if (this.fakeOnline.has(idx)) {
+        if (this.fakeOnline.size > FAKE_ONLINE_MIN) this.fakeOnline.delete(idx)
+      } else {
+        this.fakeOnline.add(idx)
+      }
       this.emitPresence()
       this.timers.push(window.setTimeout(presenceTick, 8_000))
     }

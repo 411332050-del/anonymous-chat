@@ -1,8 +1,8 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js'
 import { Emitter } from '../emitter'
 import type { ChatService } from '../ChatService'
-import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, aliasProblem, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, PresenceMember, Unsubscribe } from '../types'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
 
 // 階段二的真服務：Supabase 資料庫存訊息、Realtime 推送新訊息、Presence 算在線人數、
 // 匿名登入辨認同一個瀏覽器。資料庫那一側的規則見 supabase/migrations/0001_init.sql 與 0002_alias.sql。
@@ -25,6 +25,8 @@ const JOIN_TIMEOUT_MS = 12_000
 const CONFIRM_FALLBACK_MS = 3_000
 const SEEN_CAP = 200
 const CHANNEL_NAME = 'lobby'
+/** 剛連上的這段時間，在線名單還在陸續同步，不顯示「進來了」提示 */
+const PRESENCE_QUIET_MS = 2_000
 
 /** 資料庫來的資料先驗證格式；不合格回傳 null（丟棄）。 */
 function toMessage(row: MessageRow): Message | null {
@@ -65,6 +67,9 @@ export class SupabaseChatService implements ChatService {
   /** 目前看過的最新一則的時間，斷線重連時用來補抓錯過的訊息 */
   private lastSeen: string | null = null
   private seen = new Set<string>()
+  /** 上一次的在線名單（authorId → 名稱），用來比對誰進來、誰離開 */
+  private knownPresence: Map<string, string> | null = null
+  private presenceQuietUntil = 0
   private timers = new Set<number>()
   private giveUpTimer: number | undefined
   private disposed = true
@@ -83,6 +88,7 @@ export class SupabaseChatService implements ChatService {
     this.everOnline = false
     this.historyReady = false
     this.buffered = []
+    this.knownPresence = null
     this.emitter.emit('connection:status', 'connecting')
 
     try {
@@ -108,6 +114,7 @@ export class SupabaseChatService implements ChatService {
       await client.realtime.setAuth(session.access_token)
       const history = await this.connectAndLoadHistory(client, me)
 
+      window.addEventListener('pagehide', this.onPageHide)
       window.addEventListener('offline', this.onBrowserOffline)
       window.addEventListener('online', this.onBrowserOnline)
 
@@ -221,7 +228,7 @@ export class SupabaseChatService implements ChatService {
           if (this.disposed || this.channel !== channel) return
 
           if (status === 'SUBSCRIBED') {
-            void channel.track({ at: Date.now() })
+            void channel.track(this.presencePayload())
             if (!settled) {
               this.loadHistory(client).then((page) => {
                 if (!settled) {
@@ -272,9 +279,40 @@ export class SupabaseChatService implements ChatService {
     if (!this.lastSeen || message.createdAt > this.lastSeen) this.lastSeen = message.createdAt
   }
 
+  /** 登記在線時附上自己的名稱（名稱以資料庫回傳的為準）。 */
+  private presencePayload(): { nickname: string; at: number } {
+    return { nickname: this.me?.nickname ?? '', at: Date.now() }
+  }
+
+  /** 整理在線名單、人數，並比對出誰進來、誰離開。 */
   private emitPresence(): void {
     if (!this.channel) return
-    this.emitter.emit('presence:count', Object.keys(this.channel.presenceState()).length)
+    const state = this.channel.presenceState() as Record<string, Array<{ nickname?: unknown }>>
+    const members: PresenceMember[] = []
+    for (const [authorId, metas] of Object.entries(state)) {
+      // 自己的名稱用資料庫給的；別人的名稱來自對方瀏覽器，要先檢查格式
+      const nickname = authorId === this.me?.authorId ? this.me.nickname : metas[metas.length - 1]?.nickname
+      if (isValidNickname(nickname)) members.push({ authorId, nickname })
+    }
+    this.emitter.emit('presence:list', members)
+    this.emitter.emit('presence:count', members.length)
+
+    const now = Date.now()
+    if (this.knownPresence === null) this.presenceQuietUntil = now + PRESENCE_QUIET_MS
+    const next = new Map(members.map((m) => [m.authorId, m.nickname]))
+    if (this.knownPresence !== null && now >= this.presenceQuietUntil) {
+      for (const [id, nickname] of next) {
+        if (!this.knownPresence.has(id) && id !== this.me?.authorId) {
+          this.emitter.emit('presence:notice', { kind: 'join', nickname })
+        }
+      }
+      for (const [id, nickname] of this.knownPresence) {
+        if (!next.has(id) && id !== this.me?.authorId) {
+          this.emitter.emit('presence:notice', { kind: 'leave', nickname })
+        }
+      }
+    }
+    this.knownPresence = next
   }
 
   /** 送出成功後若沒有收到即時推送的確認，就自己去拿。 */
@@ -294,6 +332,11 @@ export class SupabaseChatService implements ChatService {
   }
 
   // ---- 斷線重連 ----
+
+  /** 關閉分頁時盡量先通知「我離開了」。 */
+  private onPageHide = () => {
+    void this.channel?.untrack()
+  }
 
   private onBrowserOffline = () => {
     if (this.everOnline) this.markReconnecting()
@@ -329,7 +372,7 @@ export class SupabaseChatService implements ChatService {
   private async recover(): Promise<void> {
     const client = this.client
     if (!client || this.disposed) return
-    void this.channel?.track({ at: Date.now() })
+    void this.channel?.track(this.presencePayload())
     try {
       let query = client
         .from('messages')
@@ -377,8 +420,15 @@ export class SupabaseChatService implements ChatService {
     this.giveUpTimer = undefined
     window.removeEventListener('offline', this.onBrowserOffline)
     window.removeEventListener('online', this.onBrowserOnline)
-    if (this.channel && this.client) void this.client.removeChannel(this.channel)
+    window.removeEventListener('pagehide', this.onPageHide)
+    const { channel, client } = this
+    if (channel && client) {
+      // 先取消在線登記，其他人的名單與人數才會馬上更新
+      const remove = () => void client.removeChannel(channel)
+      void channel.untrack().then(remove, remove)
+    }
     this.channel = null
+    this.knownPresence = null
     this.seen.clear()
     // 身分（登入狀態）保留在瀏覽器，下次進來還是同一個人
   }

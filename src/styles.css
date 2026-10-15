@@ -187,8 +187,53 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 13px;
   color: var(--text-soft);
+  cursor: pointer;
+}
+
+.header__caret {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.online-list {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  max-height: 30vh;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--border-input);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
+.online-list__you {
+  color: var(--accent-text);
+}
+
+.presence-notice {
+  flex: none;
+  min-height: 0;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.presence-notice:not(:empty) {
+  padding: 6px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .dot {

@@ -16,6 +16,18 @@ export interface Me {
   nickname: string
 }
 
+/** 目前在線的一個人 */
+export interface PresenceMember {
+  authorId: string
+  nickname: string
+}
+
+/** 有人進來／離開的提示（不含自己） */
+export interface PresenceNotice {
+  kind: 'join' | 'leave'
+  nickname: string
+}
+
 export type ErrorCode = 'EMPTY' | 'TOO_LONG' | 'RATE_LIMITED' | 'OFFLINE' | 'UNKNOWN'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'reconnecting' | 'failed'
@@ -37,6 +49,9 @@ export interface ChatEvents {
   'history:loaded': HistoryPage
   'message:new': Message
   'presence:count': number
+  /** 目前在線的名單（同一人開多個分頁只算一人） */
+  'presence:list': PresenceMember[]
+  'presence:notice': PresenceNotice
   'connection:status': ConnectionStatus
   'send:error': { id: string; code: ErrorCode }
 }
