@@ -1,6 +1,7 @@
 import type { DebuggableChatService } from '../chat/ChatService'
 import { DEBUG_PANEL } from '../config'
 import { DevPanel } from './DevPanel'
+import { EntryScreen } from './screens/EntryScreen'
 import { EnteringScreen } from './screens/EnteringScreen'
 import { FailedScreen } from './screens/FailedScreen'
 import { LobbyScreen } from './screens/LobbyScreen'
@@ -11,8 +12,9 @@ export function App({ service }: { service: DebuggableChatService }) {
 
   return (
     <>
+      {chat.phase === 'entry' && <EntryScreen onEnter={chat.enter} />}
       {chat.phase === 'entering' && <EnteringScreen />}
-      {chat.phase === 'failed' && <FailedScreen onRetry={chat.enter} />}
+      {chat.phase === 'failed' && <FailedScreen onRetry={() => void chat.enter()} onBack={chat.backToEntry} />}
       {chat.phase === 'lobby' && chat.me && (
         <LobbyScreen
           me={chat.me}

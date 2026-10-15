@@ -1,8 +1,8 @@
 import { Emitter } from '../emitter'
 import type { ChatService, MockDebug } from '../ChatService'
 import type { ChatEvents, Cursor, HistoryPage, Me, Message, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, RateLimiter, sanitize, validateContent } from '../../rules'
-import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomNickname } from './seed'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, RateLimiter, aliasProblem, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomTag } from './seed'
 
 // 階段一的假服務：所有資料都只存在這個瀏覽器（localStorage），
 // 同一個瀏覽器的其他分頁透過 BroadcastChannel 互相傳話。
@@ -88,7 +88,9 @@ export class MockChatService implements ChatService {
     return this.emitter.on(event, handler)
   }
 
-  async join(): Promise<Me> {
+  async join(rawAlias: string): Promise<Me> {
+    const alias = sanitizeAlias(rawAlias)
+    if (aliasProblem(alias)) throw new Error('INVALID_ALIAS')
     this.emitter.emit('connection:status', 'connecting')
     await delay(700)
     if (this.joinFails) {
@@ -96,7 +98,7 @@ export class MockChatService implements ChatService {
       throw new Error('mock join failure')
     }
 
-    this.me = this.loadOrCreateIdentity()
+    this.me = this.loadOrCreateIdentity(alias)
     this.ensureSeeded()
     this.openChannel()
     this.joined = true
@@ -191,25 +193,33 @@ export class MockChatService implements ChatService {
   // 同一個瀏覽器的所有分頁預設共用一個身分（符合「同一個瀏覽器固定暱稱」的需求），
   // 所以兩個分頁其實是「同一個人」，彼此的訊息都會顯示成自己的。
   // 測試用：perTabIdentity 時每個分頁各自一個身分（存在 sessionStorage），才能扮演兩個人。
-  private loadOrCreateIdentity(): Me {
+  // 身分（編號 authorId 與 3 碼 tag）固定不變，代號每次進入時由使用者輸入。
+  private loadOrCreateIdentity(alias: string): Me {
     const store = this.perTabIdentity ? sessionStorage : localStorage
+    let saved: { authorId?: string; tag?: string } | null = null
     try {
-      const saved = JSON.parse(store.getItem(IDENTITY_KEY) ?? 'null') as Me | null
-      if (saved?.authorId && saved.nickname) return saved
+      saved = JSON.parse(store.getItem(IDENTITY_KEY) ?? 'null')
     } catch {
       // 讀不到就重新建立
     }
-    const created: Me = { authorId: newId(), nickname: randomNickname() }
+    const identity = {
+      authorId: saved?.authorId || newId(),
+      tag: saved?.tag && /^\d{3}$/.test(saved.tag) ? saved.tag : randomTag(),
+    }
     try {
-      store.setItem(IDENTITY_KEY, JSON.stringify(created))
+      store.setItem(IDENTITY_KEY, JSON.stringify(identity))
     } catch {
       // 儲存空間被禁用：這次先用暫時身分
     }
-    return created
+    return { authorId: identity.authorId, nickname: `${alias}#${identity.tag}` }
   }
 
   private readMessages(): Message[] {
-    return (readJson<Message[]>(MESSAGES_KEY) ?? []).slice().sort(byTime)
+    const raw = readJson<unknown[]>(MESSAGES_KEY) ?? []
+    return raw
+      .map(parseMessage)
+      .filter((m): m is Message => m !== null)
+      .sort(byTime)
   }
 
   private ensureSeeded(): void {
@@ -255,9 +265,11 @@ export class MockChatService implements ChatService {
         this.otherTabs.delete(wire.tabId)
         this.emitPresence()
         break
-      case 'message':
-        this.deliver(wire.message)
+      case 'message': {
+        const message = parseMessage(wire.message)
+        if (message) this.deliver(message)
         break
+      }
     }
   }
 

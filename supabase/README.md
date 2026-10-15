@@ -7,6 +7,7 @@
 | 檔案 | 內容 |
 |---|---|
 | `migrations/0001_init.sql` | 建立暱稱表、訊息表、權限規則、寫入把關、即時推送 |
+| `migrations/0002_alias.sql` | 進入時輸入代號：`profiles` 加固定編號欄位，新增 `enter_with_alias(p_alias)` |
 
 ## 怎麼套用
 
@@ -14,8 +15,27 @@
 2. 左側點 **SQL Editor**，點 **New query**。
 3. 把 `migrations/0001_init.sql` 的內容整份貼上，按右下角 **Run**。
 4. 下方顯示 `Success` 就完成。出現紅字錯誤時，把整段文字貼給我。
+5. 再點 **New query**，對 `migrations/0002_alias.sql` 重複第 3、4 步。
 
-這個檔案可以重複執行，不會刪除既有訊息。
+兩個檔案都可以重複執行，不會刪除既有訊息。
+
+套用順序：先 0001，再 0002。0002 套用前，新版網頁會無法進入聊天室。
+
+### 確認 0002 有套用成功
+
+在 SQL Editor 執行下面這段，應該看到兩列，分別是 `column | tag` 和 `function | enter_with_alias`：
+
+```sql
+select 'column' as kind, column_name as name
+from information_schema.columns
+where table_schema = 'public' and table_name = 'profiles' and column_name = 'tag'
+union all
+select 'function', proname
+from pg_proc
+where proname = 'enter_with_alias';
+```
+
+最後打開網頁，輸入代號進入聊天室，畫面上自己的名稱應該是「代號#三碼數字」。換一個代號重新進入，編號不會變。
 
 ## 它做了什麼
 
@@ -31,7 +51,7 @@
 
 `EMPTY`、`TOO_LONG`、`RATE_LIMITED`、`NOT_AUTHENTICATED`、`NO_PROFILE`
 
-`NO_PROFILE` 代表還沒呼叫過 `get_or_create_me()`；前端進入聊天室時一定會先呼叫它。
+`NO_PROFILE` 代表還沒呼叫過 `enter_with_alias()`；前端進入聊天室時一定會先呼叫它。`enter_with_alias()` 自己可能丟出 `NOT_AUTHENTICATED`、`INVALID_ALIAS`（代號去頭尾空白後不是 1～12 字）。
 
 ## 金鑰
 

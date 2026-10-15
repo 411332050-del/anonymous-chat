@@ -1,11 +1,8 @@
 import type { Message } from '../types'
 
-const ADJECTIVES = ['貓咪', '水獺', '企鵝', '狐狸', '柴犬', '浣熊', '無尾熊', '刺蝟', '海豚', '兔子', '松鼠', '貓頭鷹']
-
-export function randomNickname(): string {
-  const animal = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]
-  const num = String(Math.floor(Math.random() * 1000)).padStart(3, '0')
-  return `匿名${animal} ${num}`
+/** 展示模式的 3 碼編號（正式模式由資料庫產生） */
+export function randomTag(): string {
+  return String(Math.floor(Math.random() * 1000)).padStart(3, '0')
 }
 
 export function newId(): string {
@@ -61,7 +58,7 @@ export function createSeedMessages(count = 60): Message[] {
   for (let i = 0; i < count; i++) {
     const author = SAMPLE_AUTHORS[(i * 7 + (i % 3)) % SAMPLE_AUTHORS.length]
     messages.push({
-      id: `seed-${String(i).padStart(3, '0')}`,
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
       authorId: author.authorId,
       nickname: author.nickname,
       content: SAMPLE_LINES[i % SAMPLE_LINES.length],

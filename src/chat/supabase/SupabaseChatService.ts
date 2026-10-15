@@ -2,10 +2,10 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import { Emitter } from '../emitter'
 import type { ChatService } from '../ChatService'
 import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, sanitize, validateContent } from '../../rules'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, aliasProblem, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
 
 // 階段二的真服務：Supabase 資料庫存訊息、Realtime 推送新訊息、Presence 算在線人數、
-// 匿名登入辨認同一個瀏覽器。資料庫那一側的規則見 supabase/migrations/0001_init.sql。
+// 匿名登入辨認同一個瀏覽器。資料庫那一側的規則見 supabase/migrations/0001_init.sql 與 0002_alias.sql。
 
 interface MessageRow {
   id: string
@@ -26,14 +26,19 @@ const CONFIRM_FALLBACK_MS = 3_000
 const SEEN_CAP = 200
 const CHANNEL_NAME = 'lobby'
 
-function toMessage(row: MessageRow): Message {
-  return {
-    id: row.id,
-    authorId: row.author_id,
-    nickname: row.nickname,
-    content: row.content,
-    createdAt: row.created_at,
-  }
+/** 資料庫來的資料先驗證格式；不合格回傳 null（丟棄）。 */
+function toMessage(row: MessageRow): Message | null {
+  return parseMessage({
+    id: row?.id,
+    authorId: row?.author_id,
+    nickname: row?.nickname,
+    content: row?.content,
+    createdAt: row?.created_at,
+  })
+}
+
+function toMessages(rows: MessageRow[]): Message[] {
+  return rows.map(toMessage).filter((m): m is Message => m !== null)
 }
 
 function isNetworkFailure(message: string | undefined): boolean {
@@ -70,7 +75,9 @@ export class SupabaseChatService implements ChatService {
     return this.emitter.on(event, handler)
   }
 
-  async join(): Promise<Me> {
+  async join(rawAlias: string): Promise<Me> {
+    const alias = sanitizeAlias(rawAlias)
+    if (aliasProblem(alias)) throw new Error('INVALID_ALIAS')
     this.teardown()
     this.disposed = false
     this.everOnline = false
@@ -90,8 +97,8 @@ export class SupabaseChatService implements ChatService {
         session = data.session
       }
 
-      // 2. 取得暱稱（第一次會由資料庫產生，之後都是同一個）
-      const { data: meRows, error: meError } = await client.rpc('get_or_create_me')
+      // 2. 以代號取得暱稱：資料庫把代號加上 3 碼編號（同一個匿名身分編號固定），前端無法指定編號
+      const { data: meRows, error: meError } = await client.rpc('enter_with_alias', { p_alias: alias })
       const meRow = Array.isArray(meRows) ? meRows[0] : null
       if (meError || !meRow) throw meError ?? new Error('取不到暱稱')
       const me: Me = { authorId: meRow.author_id, nickname: meRow.nickname }
@@ -161,7 +168,7 @@ export class SupabaseChatService implements ChatService {
     if (error) throw error
     const rows = (data ?? []) as MessageRow[]
     return {
-      messages: rows.slice(0, PAGE_SIZE).reverse().map(toMessage),
+      messages: toMessages(rows.slice(0, PAGE_SIZE).reverse()),
       reachedEnd: rows.length <= PAGE_SIZE,
     }
   }
@@ -206,7 +213,8 @@ export class SupabaseChatService implements ChatService {
 
       channel
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          this.onRealtimeMessage(toMessage(payload.new as MessageRow))
+          const message = toMessage(payload.new as MessageRow)
+          if (message) this.onRealtimeMessage(message)
         })
         .on('presence', { event: 'sync' }, () => this.emitPresence())
         .subscribe((status) => {
@@ -242,7 +250,7 @@ export class SupabaseChatService implements ChatService {
       .limit(PAGE_SIZE + 1)
     if (error) throw error
     const rows = (data ?? []) as MessageRow[]
-    const messages = rows.slice(0, PAGE_SIZE).reverse().map(toMessage)
+    const messages = toMessages(rows.slice(0, PAGE_SIZE).reverse())
     messages.forEach((m) => this.remember(m))
     return { messages, reachedEnd: rows.length <= PAGE_SIZE }
   }
@@ -278,8 +286,8 @@ export class SupabaseChatService implements ChatService {
       .select('id, author_id, nickname, content, created_at')
       .eq('id', id)
       .maybeSingle()
-    if (data && !this.seen.has(id)) {
-      const message = toMessage(data as MessageRow)
+    const message = data ? toMessage(data as MessageRow) : null
+    if (message && !this.seen.has(id)) {
       this.remember(message)
       this.emitter.emit('message:new', message)
     }
@@ -338,7 +346,7 @@ export class SupabaseChatService implements ChatService {
         const page = await this.loadHistory(client)
         this.emitter.emit('history:loaded', page)
       } else {
-        rows.map(toMessage).forEach((m) => {
+        toMessages(rows).forEach((m) => {
           this.remember(m)
           this.emitter.emit('message:new', m)
         })

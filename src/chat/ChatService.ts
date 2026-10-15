@@ -5,8 +5,12 @@ import type { ChatEvents, Cursor, HistoryPage, Me, Unsubscribe } from './types'
  * 畫面層只能透過它跟後端說話，絕對不可以直接碰 Supabase。
  */
 export interface ChatService {
-  /** 進入大廳。成功回傳「我是誰」，接著會觸發 history:loaded、presence:count、connection:status。 */
-  join(): Promise<Me>
+  /**
+   * 以代號進入大廳（使用者按下「進入聊天室」之後才會呼叫）。
+   * 成功回傳「我是誰」（暱稱＝代號＋3 碼編號，例如「小明#371」，編號由後端產生、同一個匿名身分固定不變），
+   * 接著會觸發 history:loaded、presence:count、connection:status。代號不合規則時丟出錯誤。
+   */
+  join(alias: string): Promise<Me>
   /** 發送訊息。成功時會收到同一個 id 的 message:new；失敗時收到 send:error。 */
   sendMessage(id: string, content: string): Promise<void>
   /** 載入更早的訊息（最多 50 則）。 */

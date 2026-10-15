@@ -1,6 +1,6 @@
 import { WarningIcon } from '../components/Icons'
 
-export function FailedScreen({ onRetry }: { onRetry: () => void }) {
+export function FailedScreen({ onRetry, onBack }: { onRetry: () => void; onBack: () => void }) {
   return (
     <div className="center-screen center-screen--error">
       <WarningIcon />
@@ -10,6 +10,9 @@ export function FailedScreen({ onRetry }: { onRetry: () => void }) {
       </div>
       <button type="button" className="primary" onClick={onRetry}>
         重試
+      </button>
+      <button type="button" className="link-button" onClick={onBack}>
+        改用其他代號
       </button>
     </div>
   )

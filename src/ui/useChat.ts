@@ -3,7 +3,7 @@ import type { ChatService } from '../chat/ChatService'
 import type { ConnectionStatus, ErrorCode, Me, Message } from '../chat/types'
 import { RateLimiter, sanitize, validateContent } from '../rules'
 
-export type Phase = 'entering' | 'lobby' | 'failed'
+export type Phase = 'entry' | 'entering' | 'lobby' | 'failed'
 export type SendState = 'sending' | 'sent' | 'failed'
 
 export interface ViewMessage extends Message {
@@ -28,7 +28,7 @@ function hintFor(code: ErrorCode): Hint {
 
 /** 把聊天服務的事件整理成畫面要用的狀態。畫面層只透過這裡碰聊天服務。 */
 export function useChat(service: ChatService) {
-  const [phase, setPhase] = useState<Phase>('entering')
+  const [phase, setPhase] = useState<Phase>('entry')
   const [me, setMe] = useState<Me | null>(null)
   const [messages, setMessages] = useState<ViewMessage[]>([])
   const [reachedEnd, setReachedEnd] = useState(false)
@@ -39,6 +39,7 @@ export function useChat(service: ChatService) {
   const [hint, setHint] = useState<Hint>(null)
 
   const meRef = useRef<Me | null>(null)
+  const aliasRef = useRef('')
   const contents = useRef(new Map<string, string>())
   const rateLimiter = useRef(new RateLimiter())
   const hintTimer = useRef<number>()
@@ -66,10 +67,12 @@ export function useChat(service: ChatService) {
     })
   }, [])
 
-  const enter = useCallback(async () => {
+  /** 使用者按下「進入聊天室」才會走到這裡；不帶代號時（重試）沿用上一次輸入的代號。 */
+  const enter = useCallback(async (alias?: string) => {
+    if (alias !== undefined) aliasRef.current = alias
     setPhase('entering')
     try {
-      const who = await service.join()
+      const who = await service.join(aliasRef.current)
       meRef.current = who
       setMe(who)
       setPhase('lobby')
@@ -98,13 +101,12 @@ export function useChat(service: ChatService) {
         showHint(hintFor(code))
       }),
     ]
-    void enter()
     return () => {
       offs.forEach((off) => off())
       service.leave()
       window.clearTimeout(hintTimer.current)
     }
-  }, [service, enter, merge, showHint])
+  }, [service, merge, showHint])
 
   /** 傳送；回傳 true 代表已受理（輸入框可以清空）。 */
   const send = useCallback(
@@ -162,5 +164,10 @@ export function useChat(service: ChatService) {
     }
   }, [merge, service])
 
-  return { phase, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, connection, hint, send, retry, loadOlder, enter }
+  const backToEntry = useCallback(() => {
+    service.leave()
+    setPhase('entry')
+  }, [service])
+
+  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, connection, hint, send, retry, loadOlder, enter }
 }
