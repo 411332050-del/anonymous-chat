@@ -58,7 +58,7 @@ function isNetworkFailure(message: string | undefined): boolean {
 /** 把資料庫回傳的錯誤對應成通訊約定的錯誤代碼。 */
 function toErrorCode(error: { message?: string; code?: string }): ErrorCode {
   const text = error.message ?? ''
-  if (text === 'RATE_LIMITED' || text === 'EMPTY' || text === 'TOO_LONG') return text
+  if (text === 'RATE_LIMITED' || text === 'DUPLICATE' || text === 'EMPTY' || text === 'TOO_LONG') return text
   if (isNetworkFailure(text) || !navigator.onLine) return 'OFFLINE'
   return 'UNKNOWN'
 }

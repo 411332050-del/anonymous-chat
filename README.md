@@ -24,6 +24,7 @@
 | ⑤ 訊息傳送狀態 | 自己送出的訊息旁依序顯示「傳送中」→「已送出」；失敗時顯示「失敗」，點擊即可重試。 |
 | ⑥ 「正在輸入…」提示（Realtime Broadcast） | 一邊在輸入框打字，另一邊在輸入框上方看到「某某 正在輸入…」；停止約 5 秒或對方送出訊息後消失。 |
 | ⑦ 表情回應（`reactions` 資料表＋Postgres Changes 即時同步） | 每則訊息下方點「＋」選 👍 ❤️ 😂 😮 😢 🎉；顯示各表情人數、自己按過的有底色，再點一下收回；別人按的即時出現，重新整理後仍在。 |
+| ⑧ 資料庫端重複訊息偵測（同一人 30 秒內相同內容被拒絕） | 連續送出兩次相同的話，第二次顯示「請不要重複發送相同的內容」且不會出現在訊息列表；改一個字就能送。 |
 
 ### 基本功能（課程必要項目，不算新增功能）
 
@@ -50,7 +51,7 @@ npm run dev
 
 ## 資料庫
 
-不使用 Supabase CLI。依 `supabase/README.md` 的說明，依序把 `supabase/migrations/0001_init.sql`、`0002_alias.sql`（代號功能）、`0003_reactions.sql`（表情回應）貼到後台 SQL Editor 執行。
+不使用 Supabase CLI。依 `supabase/README.md` 的說明，依序把 `supabase/migrations/0001_init.sql`、`0002_alias.sql`（代號功能）、`0003_reactions.sql`（表情回應）、`0004_duplicate.sql`（重複訊息偵測）貼到後台 SQL Editor 執行。
 
 ## 打包
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatService } from '../chat/ChatService'
 import type { ConnectionStatus, ErrorCode, Me, Message, PresenceMember, Reaction } from '../chat/types'
-import { REACTION_EMOJIS, RateLimiter, TYPING_EXPIRE_MS, sanitize, validateContent } from '../rules'
+import { DUPLICATE_WINDOW_MS, REACTION_EMOJIS, RateLimiter, TYPING_EXPIRE_MS, sanitize, validateContent } from '../rules'
 
 export type Phase = 'entry' | 'entering' | 'lobby' | 'failed'
 export type SendState = 'sending' | 'sent' | 'failed'
@@ -11,7 +11,7 @@ export interface ViewMessage extends Message {
   state?: SendState
 }
 
-export type Hint = 'rate-limited' | 'offline' | 'unknown' | null
+export type Hint = 'rate-limited' | 'duplicate' | 'offline' | 'unknown' | null
 
 /** 一則訊息上的一種表情：幾個人按、我有沒有按 */
 export interface ReactionSummary {
@@ -32,6 +32,7 @@ function byTime(a: ViewMessage, b: ViewMessage): number {
 
 function hintFor(code: ErrorCode): Hint {
   if (code === 'RATE_LIMITED') return 'rate-limited'
+  if (code === 'DUPLICATE') return 'duplicate'
   if (code === 'OFFLINE') return 'offline'
   if (code === 'UNKNOWN') return 'unknown'
   return null
@@ -58,6 +59,8 @@ export function useChat(service: ChatService) {
   const aliasRef = useRef('')
   const contents = useRef(new Map<string, string>())
   const rateLimiter = useRef(new RateLimiter())
+  /** 最近送出的內容與時間：前端先擋重複，真正的把關在資料庫 */
+  const recentSent = useRef(new Map<string, number>())
   const hintTimer = useRef<number>()
   const noticeTimers = useRef(new Set<number>())
   const noticeSeq = useRef(0)
@@ -161,6 +164,9 @@ export function useChat(service: ChatService) {
       }),
       service.on('send:error', ({ id, code }) => {
         setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, state: 'failed' } : m)))
+        // 沒送成功的內容不算「剛送過」，使用者可以馬上再試
+        const failedContent = contents.current.get(id)
+        if (failedContent !== undefined && code !== 'DUPLICATE') recentSent.current.delete(failedContent)
         showHint(hintFor(code))
       }),
     ]
@@ -186,12 +192,19 @@ export function useChat(service: ChatService) {
       }
       const content = sanitize(raw)
       if (validateContent(content)) return false
+      const now = Date.now()
+      for (const [text, at] of recentSent.current) if (now - at >= DUPLICATE_WINDOW_MS) recentSent.current.delete(text)
+      if (recentSent.current.has(content)) {
+        showHint('duplicate')
+        return false
+      }
       if (!rateLimiter.current.tryConsume()) {
         showHint('rate-limited')
         return false
       }
       const id = crypto.randomUUID()
       contents.current.set(id, content)
+      recentSent.current.set(content, now)
       merge([
         { id, authorId: who.authorId, nickname: who.nickname, content, createdAt: new Date().toISOString(), state: 'sending' },
       ])

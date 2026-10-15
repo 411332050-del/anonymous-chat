@@ -42,7 +42,7 @@ export interface Reaction {
   emoji: string
 }
 
-export type ErrorCode = 'EMPTY' | 'TOO_LONG' | 'RATE_LIMITED' | 'OFFLINE' | 'UNKNOWN'
+export type ErrorCode = 'EMPTY' | 'TOO_LONG' | 'RATE_LIMITED' | 'DUPLICATE' | 'OFFLINE' | 'UNKNOWN'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'reconnecting' | 'failed'
 

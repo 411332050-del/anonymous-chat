@@ -49,6 +49,9 @@ export const TYPING_SEND_INTERVAL_MS = 3_000
 /** 收到訊號後，這麼久沒再收到就當作停止輸入 */
 export const TYPING_EXPIRE_MS = 5_000
 
+/** 同一個人在這段時間內送出內容完全相同的訊息，視為重複 */
+export const DUPLICATE_WINDOW_MS = 30_000
+
 /** 回傳錯誤代碼；通過則回傳 null。傳入的應是 sanitize 之後的文字。 */
 export function validateContent(content: string): ErrorCode | null {
   if (content.length === 0) return 'EMPTY'

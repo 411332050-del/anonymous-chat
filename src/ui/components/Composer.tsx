@@ -14,6 +14,7 @@ interface Props {
 
 const HINT_TEXT: Record<Exclude<Hint, null>, string> = {
   'rate-limited': '發言太快了，請稍等幾秒',
+  duplicate: '請不要重複發送相同的內容',
   offline: '目前離線，連線後可再試',
   unknown: '送出失敗，請重試',
 }

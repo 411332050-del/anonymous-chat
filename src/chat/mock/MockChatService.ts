@@ -1,7 +1,7 @@
 import { Emitter } from '../emitter'
 import type { ChatService, MockDebug } from '../ChatService'
 import type { ChatEvents, Cursor, HistoryPage, Me, Message, PresenceMember, Reaction, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, REACTION_EMOJIS, TYPING_SEND_INTERVAL_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, parseReaction, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import { DUPLICATE_WINDOW_MS, PAGE_SIZE, RECONNECT_GIVE_UP_MS, REACTION_EMOJIS, TYPING_SEND_INTERVAL_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, parseReaction, sanitize, sanitizeAlias, validateContent } from '../../rules'
 import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomTag } from './seed'
 
 // 階段一的假服務：所有資料都只存在這個瀏覽器（localStorage），
@@ -70,6 +70,8 @@ export class MockChatService implements ChatService {
   private missed: Message[] = []
 
   private rateLimiter = new RateLimiter()
+  /** 最近送出的內容與時間，用來擋重複訊息（規則與資料庫一致） */
+  private recentContents = new Map<string, number>()
 
   constructor(private options: { perTabIdentity?: boolean } = {}) {}
 
@@ -151,11 +153,18 @@ export class MockChatService implements ChatService {
       this.emitter.emit('send:error', { id, code: invalid })
       return
     }
+    const now = Date.now()
+    for (const [text, at] of this.recentContents) if (now - at >= DUPLICATE_WINDOW_MS) this.recentContents.delete(text)
+    if (this.recentContents.has(content)) {
+      this.emitter.emit('send:error', { id, code: 'DUPLICATE' })
+      return
+    }
     if (!this.rateLimiter.tryConsume()) {
       this.emitter.emit('send:error', { id, code: 'RATE_LIMITED' })
       return
     }
 
+    this.recentContents.set(content, now)
     const message: Message = {
       id,
       authorId: me.authorId,

@@ -7,6 +7,7 @@
 | 檔案 | 內容 |
 |---|---|
 | `migrations/0001_init.sql` | 建立暱稱表、訊息表、權限規則、寫入把關、即時推送 |
+| `migrations/0004_duplicate.sql` | 重複訊息偵測：重新定義寫入把關，多一關「30 秒內相同內容」 |
 | `migrations/0003_reactions.sql` | 表情回應：`reactions` 資料表、`toggle_reaction()`、加入 Realtime |
 | `migrations/0002_alias.sql` | 進入時輸入代號：`profiles` 加固定編號欄位，新增 `enter_with_alias(p_alias)` |
 
@@ -20,7 +21,7 @@
 
 兩個檔案都可以重複執行，不會刪除既有訊息。
 
-套用順序：0001 → 0002 → 0003。0003 套用前，新版網頁仍可聊天，但表情回應會失敗並顯示提示。0001 裡的 `generate_nickname()`（產生「匿名貓咪 482」）與 `get_or_create_me()` 已被 0002 的 `enter_with_alias()` 取代，前端不再呼叫；為了不改動 0001，這兩個函式保留但不使用。0002 套用前，新版網頁會無法進入聊天室。
+套用順序：0001 → 0002 → 0003 → 0004。0004 只是替換 0001 建立的 `messages_before_insert()` 函式，內容多一關「重複訊息」。0003 套用前，新版網頁仍可聊天，但表情回應會失敗並顯示提示。0001 裡的 `generate_nickname()`（產生「匿名貓咪 482」）與 `get_or_create_me()` 已被 0002 的 `enter_with_alias()` 取代，前端不再呼叫；為了不改動 0001，這兩個函式保留但不使用。0002 套用前，新版網頁會無法進入聊天室。
 
 ### 確認 0002 有套用成功
 
@@ -50,7 +51,7 @@ where proname = 'enter_with_alias';
 
 資料庫拒絕訊息時，錯誤訊息的文字就是代碼，前端依此顯示提示：
 
-`EMPTY`、`TOO_LONG`、`RATE_LIMITED`、`NOT_AUTHENTICATED`、`NO_PROFILE`
+`EMPTY`、`TOO_LONG`、`RATE_LIMITED`、`DUPLICATE`（0004 起）、`NOT_AUTHENTICATED`、`NO_PROFILE`
 
 `toggle_reaction()` 可能丟出 `NOT_AUTHENTICATED`、`INVALID_REACTION`、`NO_MESSAGE`、`RATE_LIMITED`。
 
