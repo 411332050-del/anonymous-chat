@@ -12,7 +12,8 @@ interface Props {
   olderError: boolean
   onlineCount: number
   members: PresenceMember[]
-  notice: string | null
+  notices: { id: number; text: string }[]
+  onLeave: () => void
   connection: ConnectionStatus
   hint: Hint
   onSend: (text: string) => boolean
@@ -23,7 +24,7 @@ interface Props {
 export function LobbyScreen(p: Props) {
   return (
     <div className="lobby">
-      <Header me={p.me} onlineCount={p.onlineCount} members={p.members} notice={p.notice} connection={p.connection} />
+      <Header me={p.me} onlineCount={p.onlineCount} members={p.members} notices={p.notices} connection={p.connection} onLeave={p.onLeave} />
       <div className="lobby__body">
         <MessageList
           messages={p.messages}

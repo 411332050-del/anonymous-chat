@@ -14,7 +14,8 @@ export interface ViewMessage extends Message {
 export type Hint = 'rate-limited' | 'offline' | 'unknown' | null
 
 const HINT_MS = 4000
-const NOTICE_MS = 4000
+const NOTICE_MS = 6000
+const NOTICE_MAX = 3
 
 function byTime(a: ViewMessage, b: ViewMessage): number {
   return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1
@@ -37,7 +38,7 @@ export function useChat(service: ChatService) {
   const [olderError, setOlderError] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
   const [members, setMembers] = useState<PresenceMember[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notices, setNotices] = useState<{ id: number; text: string }[]>([])
   const [connection, setConnection] = useState<ConnectionStatus>('connecting')
   const [hint, setHint] = useState<Hint>(null)
 
@@ -46,7 +47,8 @@ export function useChat(service: ChatService) {
   const contents = useRef(new Map<string, string>())
   const rateLimiter = useRef(new RateLimiter())
   const hintTimer = useRef<number>()
-  const noticeTimer = useRef<number>()
+  const noticeTimers = useRef(new Set<number>())
+  const noticeSeq = useRef(0)
   const loadingRef = useRef(false)
   const messagesRef = useRef<ViewMessage[]>([])
   const reachedEndRef = useRef(false)
@@ -98,9 +100,15 @@ export function useChat(service: ChatService) {
       service.on('presence:count', setOnlineCount),
       service.on('presence:list', setMembers),
       service.on('presence:notice', ({ kind, nickname }) => {
-        window.clearTimeout(noticeTimer.current)
-        setNotice(`${nickname} ${kind === 'join' ? '進來了' : '離開了'}`)
-        noticeTimer.current = window.setTimeout(() => setNotice(null), NOTICE_MS)
+        // 提示可以疊加（最多同時 3 則），各自 6 秒後消失，避免連續進出時被蓋掉
+        const id = ++noticeSeq.current
+        const text = `${nickname} ${kind === 'join' ? '進來了' : '離開了'}`
+        setNotices((prev) => [...prev, { id, text }].slice(-NOTICE_MAX))
+        const timer = window.setTimeout(() => {
+          noticeTimers.current.delete(timer)
+          setNotices((prev) => prev.filter((n) => n.id !== id))
+        }, NOTICE_MS)
+        noticeTimers.current.add(timer)
       }),
       service.on('connection:status', (status) => {
         setConnection(status)
@@ -115,7 +123,8 @@ export function useChat(service: ChatService) {
       offs.forEach((off) => off())
       service.leave()
       window.clearTimeout(hintTimer.current)
-      window.clearTimeout(noticeTimer.current)
+      noticeTimers.current.forEach((t) => window.clearTimeout(t))
+      noticeTimers.current.clear()
     }
   }, [service, merge, showHint])
 
@@ -175,10 +184,19 @@ export function useChat(service: ChatService) {
     }
   }, [merge, service])
 
+  /** 離開聊天室，回到進入畫面（可以換代號再進入）。 */
   const backToEntry = useCallback(() => {
     service.leave()
+    noticeTimers.current.forEach((t) => window.clearTimeout(t))
+    noticeTimers.current.clear()
+    setNotices([])
+    setMembers([])
+    setOnlineCount(0)
+    setMessages([])
+    setMe(null)
+    meRef.current = null
     setPhase('entry')
   }, [service])
 
-  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notice, connection, hint, send, retry, loadOlder, enter }
+  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notices, connection, hint, send, retry, loadOlder, enter }
 }

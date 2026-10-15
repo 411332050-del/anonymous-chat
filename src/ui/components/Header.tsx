@@ -6,11 +6,12 @@ interface Props {
   me: Me
   onlineCount: number
   members: PresenceMember[]
-  notice: string | null
+  notices: { id: number; text: string }[]
   connection: ConnectionStatus
+  onLeave: () => void
 }
 
-export function Header({ me, onlineCount, members, notice, connection }: Props) {
+export function Header({ me, onlineCount, members, notices, connection, onLeave }: Props) {
   const [open, setOpen] = useState(false)
   // 自己排最前面，其餘依名稱排序
   const sorted = [...members].sort((a, b) =>
@@ -34,6 +35,9 @@ export function Header({ me, onlineCount, members, notice, connection }: Props) 
         </button>
         <div className="header__me">
           你是：<span className="header__nickname">{me.nickname}</span>
+          <button type="button" className="header__leave" onClick={onLeave}>
+            離開
+          </button>
         </div>
         {open && (
           <ul id="online-list" className="online-list" aria-label="在線名單">
@@ -53,7 +57,9 @@ export function Header({ me, onlineCount, members, notice, connection }: Props) 
         </div>
       )}
       <div className="presence-notice" role="status" aria-live="polite">
-        {notice}
+        {notices.map((n) => (
+          <div key={n.id}>{n.text}</div>
+        ))}
       </div>
     </>
   )

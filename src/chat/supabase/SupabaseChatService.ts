@@ -25,8 +25,6 @@ const JOIN_TIMEOUT_MS = 12_000
 const CONFIRM_FALLBACK_MS = 3_000
 const SEEN_CAP = 200
 const CHANNEL_NAME = 'lobby'
-/** 剛連上的這段時間，在線名單還在陸續同步，不顯示「進來了」提示 */
-const PRESENCE_QUIET_MS = 2_000
 
 /** 資料庫來的資料先驗證格式；不合格回傳 null（丟棄）。 */
 function toMessage(row: MessageRow): Message | null {
@@ -69,7 +67,6 @@ export class SupabaseChatService implements ChatService {
   private seen = new Set<string>()
   /** 上一次的在線名單（authorId → 名稱），用來比對誰進來、誰離開 */
   private knownPresence: Map<string, string> | null = null
-  private presenceQuietUntil = 0
   private timers = new Set<number>()
   private giveUpTimer: number | undefined
   private disposed = true
@@ -297,19 +294,21 @@ export class SupabaseChatService implements ChatService {
     this.emitter.emit('presence:list', members)
     this.emitter.emit('presence:count', members.length)
 
-    const now = Date.now()
-    if (this.knownPresence === null) this.presenceQuietUntil = now + PRESENCE_QUIET_MS
+    // 基準名單：等到「自己」也出現在名單裡（代表伺服器已送來完整名單）才建立，
+    // 之前已經在線的人不算「進來了」；建立之後的每一次變動都會提示，不靠時間窗。
     const next = new Map(members.map((m) => [m.authorId, m.nickname]))
-    if (this.knownPresence !== null && now >= this.presenceQuietUntil) {
-      for (const [id, nickname] of next) {
-        if (!this.knownPresence.has(id) && id !== this.me?.authorId) {
-          this.emitter.emit('presence:notice', { kind: 'join', nickname })
-        }
+    if (this.knownPresence === null) {
+      if (this.me && next.has(this.me.authorId)) this.knownPresence = next
+      return
+    }
+    for (const [id, nickname] of next) {
+      if (!this.knownPresence.has(id) && id !== this.me?.authorId) {
+        this.emitter.emit('presence:notice', { kind: 'join', nickname })
       }
-      for (const [id, nickname] of this.knownPresence) {
-        if (!next.has(id) && id !== this.me?.authorId) {
-          this.emitter.emit('presence:notice', { kind: 'leave', nickname })
-        }
+    }
+    for (const [id, nickname] of this.knownPresence) {
+      if (!next.has(id) && id !== this.me?.authorId) {
+        this.emitter.emit('presence:notice', { kind: 'leave', nickname })
       }
     }
     this.knownPresence = next

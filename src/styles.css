@@ -249,6 +249,18 @@ textarea {
   color: var(--text-muted);
 }
 
+.header__leave {
+  margin-left: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .header__nickname {
   color: var(--accent-text);
   font-weight: 500;
