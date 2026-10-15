@@ -1,7 +1,7 @@
 import { Emitter } from '../emitter'
 import type { ChatService, MockDebug } from '../ChatService'
-import type { ChatEvents, Cursor, HistoryPage, Me, Message, PresenceMember, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, TYPING_SEND_INTERVAL_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import type { ChatEvents, Cursor, HistoryPage, Me, Message, PresenceMember, Reaction, Unsubscribe } from '../types'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, REACTION_EMOJIS, TYPING_SEND_INTERVAL_MS, RateLimiter, aliasProblem, isValidNickname, parseMessage, parseReaction, sanitize, sanitizeAlias, validateContent } from '../../rules'
 import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomTag } from './seed'
 
 // 階段一的假服務：所有資料都只存在這個瀏覽器（localStorage），
@@ -10,6 +10,8 @@ import { BOT_AUTHORS, BOT_LINES, createSeedMessages, newId, randomTag } from './
 const IDENTITY_KEY = 'anonchat.identity'
 const MESSAGES_KEY = 'anonchat.messages'
 const BOT_LEASE_KEY = 'anonchat.botLease'
+const REACTIONS_KEY = 'anonchat.reactions'
+const MAX_REACTIONS = 1000
 const CHANNEL_NAME = 'anonchat'
 const MAX_STORED = 500
 const FAKE_ONLINE_MIN = 2
@@ -20,6 +22,7 @@ type Wire =
   | { type: 'here'; tabId: string; member: PresenceMember }
   | { type: 'bye'; tabId: string }
   | { type: 'typing'; authorId: string; nickname: string }
+  | { type: 'reaction'; reaction: Reaction; active: boolean }
 
 function readJson<T>(key: string): T | null {
   try {
@@ -116,6 +119,7 @@ export class MockChatService implements ChatService {
       const page = all.slice(-PAGE_SIZE)
       this.emitter.emit('history:loaded', { messages: page, reachedEnd: all.length <= PAGE_SIZE })
       this.emitPresence()
+      this.emitReactions(page.map((m) => m.id))
       this.emitter.emit('connection:status', 'online')
     }, 0)
 
@@ -173,10 +177,23 @@ export class MockChatService implements ChatService {
     const older = this.readMessages().filter(
       (m) => m.createdAt < before.createdAt || (m.createdAt === before.createdAt && m.id < before.id),
     )
+    const olderPage = older.slice(-PAGE_SIZE)
+    setTimeout(() => this.emitReactions(olderPage.map((m) => m.id)), 0)
     return {
-      messages: older.slice(-PAGE_SIZE),
+      messages: olderPage,
       reachedEnd: older.length <= PAGE_SIZE,
     }
+  }
+
+  async toggleReaction(messageId: string, emoji: string): Promise<boolean> {
+    const me = this.me
+    if (!me || !this.joined || this.offline) throw new Error('OFFLINE')
+    await delay(150)
+    const reaction: Reaction = { messageId, authorId: me.authorId, emoji }
+    if (!parseReaction(reaction)) throw new Error('INVALID_REACTION')
+    const active = this.applyReaction(reaction)
+    this.channel?.postMessage({ type: 'reaction', reaction, active } satisfies Wire)
+    return active
   }
 
   notifyTyping(): void {
@@ -226,6 +243,31 @@ export class MockChatService implements ChatService {
       // 儲存空間被禁用：這次先用暫時身分
     }
     return { authorId: identity.authorId, nickname: `${alias}#${identity.tag}` }
+  }
+
+  private readReactions(): Reaction[] {
+    return (readJson<unknown[]>(REACTIONS_KEY) ?? []).map(parseReaction).filter((r): r is Reaction => r !== null)
+  }
+
+  private sameReaction(a: Reaction, b: Reaction): boolean {
+    return a.messageId === b.messageId && a.authorId === b.authorId && a.emoji === b.emoji
+  }
+
+  /** 沒有就新增、有就收回；回傳之後是否存在。 */
+  private applyReaction(reaction: Reaction): boolean {
+    const all = this.readReactions()
+    const exists = all.some((r) => this.sameReaction(r, reaction))
+    const next = exists ? all.filter((r) => !this.sameReaction(r, reaction)) : [...all, reaction]
+    writeJson(REACTIONS_KEY, next.slice(-MAX_REACTIONS))
+    return !exists
+  }
+
+  private emitReactions(messageIds: string[]): void {
+    const wanted = new Set(messageIds)
+    this.emitter.emit('reactions:loaded', {
+      messageIds,
+      reactions: this.readReactions().filter((r) => wanted.has(r.messageId)),
+    })
   }
 
   private readMessages(): Message[] {
@@ -284,6 +326,11 @@ export class MockChatService implements ChatService {
           this.emitter.emit('typing', { authorId: wire.authorId, nickname: wire.nickname })
         }
         break
+      case 'reaction': {
+        const reaction = parseReaction(wire.reaction)
+        if (reaction && !this.offline) this.emitter.emit('reaction:changed', { reaction, active: wire.active === true })
+        break
+      }
       case 'message': {
         const message = parseMessage(wire.message)
         if (message) this.deliver(message)
@@ -368,6 +415,18 @@ export class MockChatService implements ChatService {
     writeJson(BOT_LEASE_KEY, { tabId: this.tabId, until: now + 40_000 })
 
     const author = BOT_AUTHORS[Math.floor(Math.random() * BOT_AUTHORS.length)]
+    // 偶爾順便對最近的一則訊息按個表情
+    if (Math.random() < 0.5) {
+      const recent = this.readMessages().slice(-8)
+      const target = recent[Math.floor(Math.random() * recent.length)]
+      if (target && target.authorId !== author.authorId) {
+        const emoji = REACTION_EMOJIS[Math.floor(Math.random() * REACTION_EMOJIS.length)]
+        const reaction: Reaction = { messageId: target.id, authorId: author.authorId, emoji }
+        const active = this.applyReaction(reaction)
+        this.channel?.postMessage({ type: 'reaction', reaction, active } satisfies Wire)
+        this.emitter.emit('reaction:changed', { reaction, active })
+      }
+    }
     // 機器人先「正在輸入」一下，再把訊息送出
     this.emitter.emit('typing', { authorId: author.authorId, nickname: author.nickname })
     this.timers.push(

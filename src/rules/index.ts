@@ -1,7 +1,7 @@
 // 共用規則（docs/architecture.md 第 5.5、9.1 節）。
 // 假服務與日後的資料庫各依這份規格實作一次，行為必須一致。
 
-import type { ErrorCode, Message } from '../chat/types'
+import type { ErrorCode, Message, Reaction } from '../chat/types'
 
 export const MAX_LENGTH = 500
 export const PAGE_SIZE = 50
@@ -105,4 +105,25 @@ export function parseMessage(raw: unknown): Message | null {
     return null
   }
   return { id, authorId, nickname, content, createdAt }
+}
+
+/** 可以按的表情（順序就是畫面上的順序）。資料庫 0003_reactions.sql 也只允許這 6 種。 */
+export const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉'] as const
+
+/** 收到的回應先檢查格式；不合格回傳 null（呼叫端丟棄）。 */
+export function parseReaction(raw: unknown): Reaction | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const { messageId, authorId, emoji } = raw as Record<string, unknown>
+  const ok =
+    typeof messageId === 'string' &&
+    UUID_PATTERN.test(messageId) &&
+    typeof authorId === 'string' &&
+    authorId.length > 0 &&
+    typeof emoji === 'string' &&
+    (REACTION_EMOJIS as readonly string[]).includes(emoji)
+  if (!ok) {
+    console.warn('[chat] 丟棄格式不合的回應')
+    return null
+  }
+  return { messageId, authorId, emoji }
 }

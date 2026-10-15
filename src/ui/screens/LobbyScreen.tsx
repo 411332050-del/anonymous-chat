@@ -3,7 +3,7 @@ import { Composer } from '../components/Composer'
 import { Header } from '../components/Header'
 import { TypingIndicator } from '../components/TypingIndicator'
 import { MessageList } from '../components/MessageList'
-import type { Hint, ViewMessage } from '../useChat'
+import type { Hint, ReactionSummary, ViewMessage } from '../useChat'
 
 interface Props {
   me: Me
@@ -15,6 +15,8 @@ interface Props {
   members: PresenceMember[]
   notices: { id: number; text: string }[]
   typers: { authorId: string; nickname: string }[]
+  reactions: Map<string, ReactionSummary[]>
+  onReact: (messageId: string, emoji: string) => void
   onTyping: () => void
   onLeave: () => void
   connection: ConnectionStatus
@@ -37,6 +39,8 @@ export function LobbyScreen(p: Props) {
           olderError={p.olderError}
           onLoadOlder={p.onLoadOlder}
           onRetry={p.onRetry}
+          reactions={p.reactions}
+          onReact={p.onReact}
         />
         <TypingIndicator typers={p.typers} />
         <Composer connection={p.connection} hint={p.hint} onSend={p.onSend} onTyping={p.onTyping} />

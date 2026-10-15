@@ -1,4 +1,5 @@
-import type { ViewMessage } from '../useChat'
+import type { ReactionSummary, ViewMessage } from '../useChat'
+import { ReactionBar } from './ReactionBar'
 
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -8,9 +9,11 @@ interface Props {
   message: ViewMessage
   mine: boolean
   onRetry: (id: string) => void
+  reactions: ReactionSummary[]
+  onReact: (messageId: string, emoji: string) => void
 }
 
-export function MessageItem({ message, mine, onRetry }: Props) {
+export function MessageItem({ message, mine, onRetry, reactions, onReact }: Props) {
   const time = formatTime(message.createdAt)
 
   if (!mine) {
@@ -20,6 +23,7 @@ export function MessageItem({ message, mine, onRetry }: Props) {
           {message.nickname} · {time}
         </div>
         <div className="bubble bubble--other">{message.content}</div>
+        <ReactionBar messageId={message.id} summaries={reactions} mine={false} onReact={onReact} />
       </div>
     )
   }
@@ -42,6 +46,7 @@ export function MessageItem({ message, mine, onRetry }: Props) {
           </>
         )}
       </div>
+      {state === 'sent' && <ReactionBar messageId={message.id} summaries={reactions} mine onReact={onReact} />}
     </div>
   )
 }

@@ -710,3 +710,74 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---------- 表情回應 ---------- */
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reactions--mine {
+  justify-content: flex-end;
+}
+
+.reaction-chip,
+.reaction-add,
+.reaction-picker__item {
+  border: 1px solid var(--border-input);
+  background: var(--surface);
+  color: var(--text-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.reaction-chip.is-mine {
+  background: var(--pill-bg);
+  border-color: var(--pill-border);
+  color: var(--pill-text);
+}
+
+.reaction-chip__count {
+  font-size: 12px;
+}
+
+.reaction-add {
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.reaction-picker {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border-input);
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.reaction-picker__item {
+  min-width: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  font-size: 18px;
+}

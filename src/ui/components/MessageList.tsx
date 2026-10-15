@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
-import type { ViewMessage } from '../useChat'
+import type { ReactionSummary, ViewMessage } from '../useChat'
 import { ArrowDownIcon, ChatIcon, SpinnerIcon } from './Icons'
 import { MessageItem } from './MessageItem'
 
@@ -11,12 +11,14 @@ interface Props {
   olderError: boolean
   onLoadOlder: () => void
   onRetry: (id: string) => void
+  reactions: Map<string, ReactionSummary[]>
+  onReact: (messageId: string, emoji: string) => void
 }
 
 const BOTTOM_SLOP = 80
 const TOP_TRIGGER = 40
 
-export function MessageList({ messages, meId, reachedEnd, loadingOlder, olderError, onLoadOlder, onRetry }: Props) {
+export function MessageList({ messages, meId, reachedEnd, loadingOlder, olderError, onLoadOlder, onRetry, reactions, onReact }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
   const prev = useRef<{ firstId?: string; lastId?: string; count: number; height: number }>({ count: 0, height: 0 })
@@ -89,7 +91,14 @@ export function MessageList({ messages, meId, reachedEnd, loadingOlder, olderErr
             )}
             {reachedEnd && !loadingOlder && <div className="list__note">— 已經是最早的訊息 —</div>}
             {messages.map((m) => (
-              <MessageItem key={m.id} message={m} mine={m.authorId === meId} onRetry={onRetry} />
+              <MessageItem
+                key={m.id}
+                message={m}
+                mine={m.authorId === meId}
+                onRetry={onRetry}
+                reactions={reactions.get(m.id) ?? []}
+                onReact={onReact}
+              />
             ))}
           </div>
         )}

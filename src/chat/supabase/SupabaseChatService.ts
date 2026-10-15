@@ -1,8 +1,8 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js'
 import { Emitter } from '../emitter'
 import type { ChatService } from '../ChatService'
-import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, PresenceMember, Unsubscribe } from '../types'
-import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, TYPING_SEND_INTERVAL_MS, aliasProblem, isValidNickname, parseMessage, sanitize, sanitizeAlias, validateContent } from '../../rules'
+import type { ChatEvents, Cursor, ErrorCode, HistoryPage, Me, Message, PresenceMember, Reaction, Unsubscribe } from '../types'
+import { PAGE_SIZE, RECONNECT_GIVE_UP_MS, TYPING_SEND_INTERVAL_MS, aliasProblem, isValidNickname, parseMessage, parseReaction, sanitize, sanitizeAlias, validateContent } from '../../rules'
 
 // 階段二的真服務：Supabase 資料庫存訊息、Realtime 推送新訊息、Presence 算在線人數、
 // 匿名登入辨認同一個瀏覽器。資料庫那一側的規則見 supabase/migrations/0001_init.sql 與 0002_alias.sql。
@@ -13,6 +13,16 @@ interface MessageRow {
   nickname: string
   content: string
   created_at: string
+}
+
+interface ReactionRow {
+  message_id: string
+  user_id: string
+  emoji: string
+}
+
+function toReaction(row: ReactionRow | null | undefined): Reaction | null {
+  return parseReaction({ messageId: row?.message_id, authorId: row?.user_id, emoji: row?.emoji })
 }
 
 interface Config {
@@ -68,6 +78,8 @@ export class SupabaseChatService implements ChatService {
   /** 上一次的在線名單（authorId → 名稱），用來比對誰進來、誰離開 */
   private knownPresence: Map<string, string> | null = null
   private lastTypingSent = 0
+  /** 進入時一起載入的回應，等歷史訊息送出後再送給畫面 */
+  private pendingReactions: { messageIds: string[]; reactions: Reaction[] } | null = null
   private timers = new Set<number>()
   private giveUpTimer: number | undefined
   private disposed = true
@@ -111,6 +123,10 @@ export class SupabaseChatService implements ChatService {
       // 3. 連上即時推送，並載入最近的訊息
       await client.realtime.setAuth(session.access_token)
       const history = await this.connectAndLoadHistory(client, me)
+      this.pendingReactions = {
+        messageIds: history.messages.map((m) => m.id),
+        reactions: await this.fetchReactions(history.messages.map((m) => m.id)),
+      }
 
       window.addEventListener('pagehide', this.onPageHide)
       window.addEventListener('offline', this.onBrowserOffline)
@@ -120,6 +136,8 @@ export class SupabaseChatService implements ChatService {
       this.later(() => {
         this.emitter.emit('history:loaded', history)
         this.historyReady = true
+        if (this.pendingReactions) this.emitter.emit('reactions:loaded', this.pendingReactions)
+        this.pendingReactions = null
         this.buffered.splice(0).forEach((m) => this.emitter.emit('message:new', m))
         this.emitPresence()
         this.everOnline = true
@@ -160,6 +178,14 @@ export class SupabaseChatService implements ChatService {
     if (error) void this.confirmFallback(id)
   }
 
+  async toggleReaction(messageId: string, emoji: string): Promise<boolean> {
+    const client = this.client
+    if (!client || this.disposed) throw new Error('OFFLINE')
+    const { data, error } = await client.rpc('toggle_reaction', { p_message_id: messageId, p_emoji: emoji })
+    if (error) throw new Error(toErrorCode(error) === 'OFFLINE' ? 'OFFLINE' : error.message)
+    return data === true
+  }
+
   async loadOlder(before: Cursor): Promise<HistoryPage> {
     const client = this.requireClient()
     const { createdAt, id } = before
@@ -172,8 +198,10 @@ export class SupabaseChatService implements ChatService {
       .limit(PAGE_SIZE + 1)
     if (error) throw error
     const rows = (data ?? []) as MessageRow[]
+    const older = toMessages(rows.slice(0, PAGE_SIZE).reverse())
+    void this.loadAndEmitReactions(older.map((m) => m.id))
     return {
-      messages: toMessages(rows.slice(0, PAGE_SIZE).reverse()),
+      messages: older,
       reachedEnd: rows.length <= PAGE_SIZE,
     }
   }
@@ -233,6 +261,12 @@ export class SupabaseChatService implements ChatService {
           const message = toMessage(payload.new as MessageRow)
           if (message) this.onRealtimeMessage(message)
         })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'reactions' }, (payload) => {
+          this.onReactionChange(payload.new as ReactionRow, true)
+        })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'reactions' }, (payload) => {
+          this.onReactionChange(payload.old as ReactionRow, false)
+        })
         .on('presence', { event: 'sync' }, () => this.emitPresence())
         .on('broadcast', { event: 'typing' }, ({ payload }) => this.onTyping(payload))
         .subscribe((status) => {
@@ -271,6 +305,30 @@ export class SupabaseChatService implements ChatService {
     const messages = toMessages(rows.slice(0, PAGE_SIZE).reverse())
     messages.forEach((m) => this.remember(m))
     return { messages, reachedEnd: rows.length <= PAGE_SIZE }
+  }
+
+  // ---- 表情回應 ----
+
+  /** 查這幾則訊息的全部回應；失敗時回傳空陣列（回應只是附加資訊，不該擋住聊天）。 */
+  private async fetchReactions(messageIds: string[]): Promise<Reaction[]> {
+    const client = this.client
+    if (!client || messageIds.length === 0) return []
+    const { data, error } = await client.from('reactions').select('message_id, user_id, emoji').in('message_id', messageIds)
+    if (error) {
+      console.warn('[chat] 載入回應失敗', error)
+      return []
+    }
+    return ((data ?? []) as ReactionRow[]).map(toReaction).filter((r): r is Reaction => r !== null)
+  }
+
+  private async loadAndEmitReactions(messageIds: string[]): Promise<void> {
+    const reactions = await this.fetchReactions(messageIds)
+    if (!this.disposed && messageIds.length > 0) this.emitter.emit('reactions:loaded', { messageIds, reactions })
+  }
+
+  private onReactionChange(row: ReactionRow | null | undefined, active: boolean): void {
+    const reaction = toReaction(row)
+    if (reaction) this.emitter.emit('reaction:changed', { reaction, active })
   }
 
   // ---- 即時事件 ----
@@ -415,6 +473,7 @@ export class SupabaseChatService implements ChatService {
           this.emitter.emit('message:new', m)
         })
       }
+      void this.loadAndEmitReactions(Array.from(this.seen).slice(-100))
       this.emitPresence()
       this.markOnline()
     } catch (error) {

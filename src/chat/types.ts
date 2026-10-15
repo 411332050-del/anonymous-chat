@@ -34,6 +34,14 @@ export interface TypingSignal {
   nickname: string
 }
 
+/** 一個人對一則訊息按的一種表情 */
+export interface Reaction {
+  messageId: string
+  /** 按表情的人（匿名編號） */
+  authorId: string
+  emoji: string
+}
+
 export type ErrorCode = 'EMPTY' | 'TOO_LONG' | 'RATE_LIMITED' | 'OFFLINE' | 'UNKNOWN'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'reconnecting' | 'failed'
@@ -59,6 +67,10 @@ export interface ChatEvents {
   'presence:list': PresenceMember[]
   'presence:notice': PresenceNotice
   typing: TypingSignal
+  /** 載入（或重新載入）這幾則訊息的全部回應；這些訊息原本的回應以這次為準 */
+  'reactions:loaded': { messageIds: string[]; reactions: Reaction[] }
+  /** 有人新增（active=true）或收回（active=false）一個回應 */
+  'reaction:changed': { reaction: Reaction; active: boolean }
   'connection:status': ConnectionStatus
   'send:error': { id: string; code: ErrorCode }
 }

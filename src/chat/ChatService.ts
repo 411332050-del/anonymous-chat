@@ -13,6 +13,11 @@ export interface ChatService {
   join(alias: string): Promise<Me>
   /** 發送訊息。成功時會收到同一個 id 的 message:new；失敗時收到 send:error。 */
   sendMessage(id: string, content: string): Promise<void>
+  /**
+   * 對一則訊息按表情；已經按過同一種就收回。回傳按完之後這個回應是否存在（true＝已按）。
+   * 失敗時丟出錯誤，訊息文字可能是 RATE_LIMITED 等代碼。
+   */
+  toggleReaction(messageId: string, emoji: string): Promise<boolean>
   /** 載入更早的訊息（最多 50 則）。 */
   loadOlder(before: Cursor): Promise<HistoryPage>
   /** 告訴大家「我正在輸入」。服務自己會節流並忽略離線狀態，畫面可以在每次輸入時直接呼叫。 */

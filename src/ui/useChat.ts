@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatService } from '../chat/ChatService'
-import type { ConnectionStatus, ErrorCode, Me, Message, PresenceMember } from '../chat/types'
-import { RateLimiter, TYPING_EXPIRE_MS, sanitize, validateContent } from '../rules'
+import type { ConnectionStatus, ErrorCode, Me, Message, PresenceMember, Reaction } from '../chat/types'
+import { REACTION_EMOJIS, RateLimiter, TYPING_EXPIRE_MS, sanitize, validateContent } from '../rules'
 
 export type Phase = 'entry' | 'entering' | 'lobby' | 'failed'
 export type SendState = 'sending' | 'sent' | 'failed'
@@ -12,6 +12,15 @@ export interface ViewMessage extends Message {
 }
 
 export type Hint = 'rate-limited' | 'offline' | 'unknown' | null
+
+/** 一則訊息上的一種表情：幾個人按、我有沒有按 */
+export interface ReactionSummary {
+  emoji: string
+  count: number
+  mine: boolean
+}
+
+const reactionKey = (r: Reaction) => `${r.messageId}|${r.authorId}|${r.emoji}`
 
 const HINT_MS = 4000
 const NOTICE_MS = 6000
@@ -38,6 +47,7 @@ export function useChat(service: ChatService) {
   const [olderError, setOlderError] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
   const [members, setMembers] = useState<PresenceMember[]>([])
+  const [reactionMap, setReactionMap] = useState<Map<string, Reaction>>(new Map())
   const [typers, setTypers] = useState<{ authorId: string; nickname: string }[]>([])
   const typingTimers = useRef(new Map<string, number>())
   const [notices, setNotices] = useState<{ id: number; text: string }[]>([])
@@ -61,6 +71,15 @@ export function useChat(service: ChatService) {
     window.clearTimeout(typingTimers.current.get(authorId))
     typingTimers.current.delete(authorId)
     setTypers((prev) => prev.filter((t) => t.authorId !== authorId))
+  }, [])
+
+  const applyReactionChange = useCallback((reaction: Reaction, active: boolean) => {
+    setReactionMap((prev) => {
+      const next = new Map(prev)
+      if (active) next.set(reactionKey(reaction), reaction)
+      else next.delete(reactionKey(reaction))
+      return next
+    })
   }, [])
 
   const showHint = useCallback((next: Hint) => {
@@ -108,6 +127,18 @@ export function useChat(service: ChatService) {
       }),
       service.on('presence:count', setOnlineCount),
       service.on('presence:list', setMembers),
+      service.on('reactions:loaded', ({ messageIds, reactions }) => {
+        const ids = new Set(messageIds)
+        setReactionMap((prev) => {
+          const next = new Map([...prev].filter(([, r]) => !ids.has(r.messageId)))
+          reactions.forEach((r) => next.set(reactionKey(r), r))
+          return next
+        })
+      }),
+      service.on('reaction:changed', ({ reaction, active }) => {
+        // 自己按的以 toggleReaction 的回傳為準，這裡只處理別人的
+        if (reaction.authorId !== meRef.current?.authorId) applyReactionChange(reaction, active)
+      }),
       service.on('typing', ({ authorId, nickname }) => {
         window.clearTimeout(typingTimers.current.get(authorId))
         typingTimers.current.set(authorId, window.setTimeout(() => clearTyper(authorId), TYPING_EXPIRE_MS))
@@ -142,7 +173,7 @@ export function useChat(service: ChatService) {
       noticeTimers.current.forEach((t) => window.clearTimeout(t))
       noticeTimers.current.clear()
     }
-  }, [service, merge, showHint, clearTyper])
+  }, [service, merge, showHint, clearTyper, applyReactionChange])
 
   /** 傳送；回傳 true 代表已受理（輸入框可以清空）。 */
   const send = useCallback(
@@ -201,6 +232,40 @@ export function useChat(service: ChatService) {
   }, [merge, service])
 
   /** 離開聊天室，回到進入畫面（可以換代號再進入）。 */
+  const toggleReaction = useCallback(
+    async (messageId: string, emoji: string) => {
+      const who = meRef.current
+      if (!who) return
+      try {
+        const active = await service.toggleReaction(messageId, emoji)
+        applyReactionChange({ messageId, authorId: who.authorId, emoji }, active)
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ''
+        showHint(code === 'RATE_LIMITED' ? 'rate-limited' : code === 'OFFLINE' ? 'offline' : 'unknown')
+      }
+    },
+    [service, applyReactionChange, showHint],
+  )
+
+  /** 每則訊息的表情統計，依固定順序排列 */
+  const reactions = useMemo(() => {
+    const byMessage = new Map<string, Map<string, { count: number; mine: boolean }>>()
+    for (const r of reactionMap.values()) {
+      const emojis = byMessage.get(r.messageId) ?? new Map()
+      const cur = emojis.get(r.emoji) ?? { count: 0, mine: false }
+      emojis.set(r.emoji, { count: cur.count + 1, mine: cur.mine || r.authorId === me?.authorId })
+      byMessage.set(r.messageId, emojis)
+    }
+    const result = new Map<string, ReactionSummary[]>()
+    for (const [messageId, emojis] of byMessage) {
+      result.set(
+        messageId,
+        REACTION_EMOJIS.filter((e) => emojis.has(e)).map((e) => ({ emoji: e, ...emojis.get(e)! })),
+      )
+    }
+    return result
+  }, [reactionMap, me])
+
   const notifyTyping = useCallback(() => service.notifyTyping(), [service])
 
   const backToEntry = useCallback(() => {
@@ -208,6 +273,7 @@ export function useChat(service: ChatService) {
     typingTimers.current.forEach((t) => window.clearTimeout(t))
     typingTimers.current.clear()
     setTypers([])
+    setReactionMap(new Map())
     noticeTimers.current.forEach((t) => window.clearTimeout(t))
     noticeTimers.current.clear()
     setNotices([])
@@ -219,5 +285,5 @@ export function useChat(service: ChatService) {
     setPhase('entry')
   }, [service])
 
-  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notices, typers, notifyTyping, connection, hint, send, retry, loadOlder, enter }
+  return { phase, backToEntry, me, messages, reachedEnd, loadingOlder, olderError, onlineCount, members, notices, typers, notifyTyping, reactions, toggleReaction, connection, hint, send, retry, loadOlder, enter }
 }
